@@ -1,0 +1,1 @@
+create table if not exists public.users (username text primary key, password_hash text not null, role text not null default 'user', failed_attempts int not null default 0, locked_until timestamptz null);
