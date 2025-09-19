@@ -14,6 +14,150 @@ APP_BUILD = "v2025-09-13-ANWW-03"
 st.set_page_config(page_title="logo.png (Supabase)", layout="wide")
 
 # ──────────────────────────────
+# THEMA / KLEUREN
+# ──────────────────────────────
+# ✱ Vul je kleuren hier in óf via st.secrets["theme"] met dezelfde keys.
+# Voorbeeld:
+# THEME = {
+#   "bg":"#0b1020","surface":"#121830","card":"#171f3a","border":"#2a355a",
+#   "text":"#e7ecff","muted":"#9fb0d9","primary":"#2f7cff","primary_contrast":"#ffffff",
+#   "accent":"#22d3ee","success":"#16a34a","warning":"#f59e0b","error":"#ef4444"
+# }
+THEME = {
+    "bg": "#f7f9fc",
+    "surface": "#f0f4ff",
+    "card": "#ffffff",
+    "border": "#e5e7eb",
+    "text": "#0f172a",
+    "muted": "#475569",
+    "primary": "#2563eb",
+    "primary_contrast": "#ffffff",
+    "accent": "#38bdf8",
+    "success": "#16a34a",
+    "warning": "#f59e0b",
+    "error": "#ef4444",
+}
+
+def _merge_theme(defaults: dict, overrides: dict | None) -> dict:
+    if not overrides:
+        return defaults
+    out = defaults.copy()
+    for k, v in overrides.items():
+        if v:
+            out[k] = v
+    return out
+
+def inject_theme():
+    # laat secrets het winnen als die er zijn
+    secret_theme = st.secrets.get("theme", None)
+    colors = _merge_theme(THEME, secret_theme)
+    css_vars = f"""
+    :root {{
+      --bg: {colors['bg']};
+      --surface: {colors['surface']};
+      --card: {colors['card']};
+      --border: {colors['border']};
+      --text: {colors['text']};
+      --muted: {colors['muted']};
+      --primary: {colors['primary']};
+      --primary-contrast: {colors['primary_contrast']};
+      --accent: {colors['accent']};
+      --success: {colors['success']};
+      --warning: {colors['warning']};
+      --error: {colors['error']};
+    }}
+    """
+
+    base = base_css()
+    page_bg = """
+    .stApp {{
+        background: radial-gradient(1200px 800px at 20% 10%, var(--surface), var(--bg) 60%);
+        color: var(--text);
+    }}
+    """
+
+    # Streamlit UI finetuning
+    ui = """
+    /* Cards/containers */
+    .stApp div[data-testid="stVerticalBlock"] > div, .stApp .stTabs {{
+        color: var(--text);
+    }}
+    /* Badges */
+    .badge {{
+        border:1px solid var(--border);
+        padding:4px 10px; border-radius:999px; font-size:0.9rem;
+        background: var(--card); color: var(--text);
+        box-shadow: 0 1px 0 rgba(0,0,0,.02), 0 1px 2px rgba(0,0,0,.04);
+    }}
+    /* Appbar */
+    .appbar {{ display:flex; align-items:center; margin-bottom:8px; font-weight:600; }}
+    .appbar-left  {{ display:flex; align-items:center; gap:.5rem; color: var(--text); }}
+    .appbar-mid   {{ display:flex; justify-content:center; }}
+    .appbar-right {{ display:flex; justify-content:flex-end; align-items:center; gap:.5rem; }}
+
+    /* Buttons */
+    .stButton > button.kv-button, .stButton > button {{
+        background: var(--primary) !important;
+        color: var(--primary-contrast) !important;
+        border: 1px solid color-mix(in srgb, var(--primary) 70%, #000 0%) !important;
+        border-radius: 10px !important;
+        box-shadow: 0 4px 14px rgba(0,0,0,0.08) !important;
+    }}
+    .stButton > button:hover {{
+        filter: brightness(1.05);
+        transform: translateY(-1px);
+        transition: all .15s ease;
+    }}
+    .stButton > button:disabled {{
+        opacity: .5 !important;
+        cursor: not-allowed !important;
+    }}
+
+    /* Inputs */
+    .stTextInput > div > div > input,
+    .stNumberInput input,
+    .stDateInput input,
+    .stSelectbox > div > div,
+    .stMultiSelect > div > div {{
+        background: var(--card) !important;
+        color: var(--text) !important;
+        border: 1px solid var(--border) !important;
+        border-radius: 10px !important;
+    }}
+
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] button[role="tab"] {{
+        color: var(--muted);
+        border-bottom: 2px solid transparent;
+    }}
+    .stTabs [data-baseweb="tab-list"] button[role="tab"][aria-selected="true"] {{
+        color: var(--text);
+        border-bottom: 2px solid var(--accent);
+    }}
+
+    /* Dataframe headers */
+    .stDataFrame thead tr th {{
+        background: color-mix(in srgb, var(--card) 80%, var(--accent) 20%);
+        color: var(--text);
+    }}
+
+    /* Alerts */
+    .stAlert div[role="alert"] {{
+        border:1px solid var(--border);
+        background: var(--card);
+        color: var(--text);
+    }}
+    .stAlert [data-testid="stMarkdown"] strong {{ color: var(--text); }}
+
+    /* Metrics */
+    [data-testid="stMetricValue"], [data-testid="stMetricDelta"] {{
+        color: var(--text);
+    }}
+    """
+
+    st.markdown(f"<style>{css_vars}{page_bg}{base}{ui}</style>", unsafe_allow_html=True)
+
+# ──────────────────────────────
 # Supabase client
 # ──────────────────────────────
 @st.cache_resource
@@ -28,38 +172,17 @@ sb = get_client()
 # Styling
 # ──────────────────────────────
 def base_css() -> str:
+    # minimal; rest via theme
     return """
     .appbar { display:flex; align-items:center; margin-bottom:8px; font-weight:600; }
     .appbar-left  { display:flex; align-items:center; gap:.5rem; }
     .appbar-mid   { display:flex; justify-content:center; }
     .appbar-right { display:flex; justify-content:flex-end; align-items:center; gap:.5rem; }
-    .badge { border:1px solid #798BB5; padding:4px 10px; border-radius:999px; font-size:0.9rem; background:#90A7E0; }
+    .badge { border:1px solid var(--border); padding:4px 10px; border-radius:999px; font-size:0.9rem; background:var(--card); }
     """
 
-st.markdown(
-    f"<style>.stApp{{background: radial-gradient(circle at 20% 20%, #AB9C5E, #A2B59E 60%);}}{base_css()}</style>",
-    unsafe_allow_html=True,
-)
-def inject_theme_from_secrets():
-    defaults = {
-        "bg": "#f7f9fc", "surface": "#f0f4ff", "card": "#ffffff", "border": "#e5e7eb",
-        "text": "#0f172a", "muted": "#475569", "primary": "#2563eb", "primary_contrast": "#ffffff",
-        "accent": "#38bdf8", "success": "#16a34a", "warning": "#f59e0b", "error": "#ef4444",
-    }
-    theme = defaults | dict(st.secrets.get("theme", {}))  # secrets winnen
-
-    css = f"""
-    :root {{
-      --bg:{theme['bg']}; --surface:{theme['surface']}; --card:{theme['card']}; --border:{theme['border']};
-      --text:{theme['text']}; --muted:{theme['muted']};
-      --primary:{theme['primary']}; --primary-contrast:{theme['primary_contrast']};
-      --accent:{theme['accent']}; --success:{theme['success']}; --warning:{theme['warning']}; --error:{theme['error']};
-    }}
-    .stApp{{background: radial-gradient(1200px 800px at 20% 10%, var(--surface), var(--bg) 60%); color: var(--text);}}
-    .badge{{border:1px solid var(--border); background:var(--card); color:var(--text);}}
-    """
-    inject_theme_from_secrets()
-
+# injecteer thema nu al (voor de rest van de UI)
+inject_theme()
 
 # ──────────────────────────────
 # Constants & "noodslot"
