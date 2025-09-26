@@ -1,178 +1,50 @@
+# app.py — ANWW Duikapp (robuste Supabase connectie + retry + nette errors)
 import streamlit as st
 from datetime import datetime as dt, timedelta
 import datetime
 import pandas as pd
 import bcrypt
 import io
-from supabase import create_client, Client
+import time
+import json
 
-APP_BUILD = "v2025-09-13-ANWW-03"
+from supabase import create_client, Client
+from postgrest.exceptions import APIError
+import httpx  # voor ConnectError/ReadTimeout
+
+APP_BUILD = "v2025-09-13-ANWW-03+net-robust"
 
 # ──────────────────────────────
 # Basisconfig
 # ──────────────────────────────
 st.set_page_config(page_title="logo.png (Supabase)", layout="wide")
 
+def secrets_healthcheck():
+    secs = list(st.secrets.keys())
+    st.caption(
+        f"🩺 Secrets: Supabase {'✅' if 'supabase' in secs else '❌'} · "
+        f"Theme {'✅' if 'theme' in secs else '❌'}"
+    )
+secrets_healthcheck()
+
 # ──────────────────────────────
-# THEMA / KLEUREN
+# THEMA
 # ──────────────────────────────
-# ✱ Vul je kleuren hier in óf via st.secrets["theme"] met dezelfde keys.
-# Voorbeeld:
-# THEME = {
-#   "bg":"#0b1020","surface":"#121830","card":"#171f3a","border":"#2a355a",
-#   "text":"#e7ecff","muted":"#9fb0d9","primary":"#2f7cff","primary_contrast":"#ffffff",
-#   "accent":"#22d3ee","success":"#16a34a","warning":"#f59e0b","error":"#ef4444"
-# }
-THEME = {
-    "bg": "#f7f9fc",
-    "surface": "#f0f4ff",
-    "card": "#ffffff",
-    "border": "#e5e7eb",
-    "text": "#0f172a",
-    "muted": "#475569",
-    "primary": "#2563eb",
-    "primary_contrast": "#ffffff",
-    "accent": "#38bdf8",
-    "success": "#16a34a",
-    "warning": "#f59e0b",
-    "error": "#ef4444",
+THEME_DEFAULTS = {
+    "bg": "#f7f9fc","surface": "#f0f4ff","card": "#ffffff","border": "#e5e7eb",
+    "text": "#0f172a","muted": "#475569","primary": "#2563eb","primary_contrast": "#ffffff",
+    "accent": "#38bdf8","success": "#16a34a","warning": "#f59e0b","error": "#ef4444",
 }
 
 def _merge_theme(defaults: dict, overrides: dict | None) -> dict:
-    if not overrides:
-        return defaults
+    if not overrides: return defaults
     out = defaults.copy()
-    for k, v in overrides.items():
-        if v:
-            out[k] = v
+    for k,v in overrides.items():
+        if isinstance(v, str) and v.strip():
+            out[k] = v.strip()
     return out
 
-def inject_theme():
-    # laat secrets het winnen als die er zijn
-    secret_theme = st.secrets.get("theme", None)
-    colors = _merge_theme(THEME, secret_theme)
-    css_vars = f"""
-    :root {{
-      --bg: {colors['bg']};
-      --surface: {colors['surface']};
-      --card: {colors['card']};
-      --border: {colors['border']};
-      --text: {colors['text']};
-      --muted: {colors['muted']};
-      --primary: {colors['primary']};
-      --primary-contrast: {colors['primary_contrast']};
-      --accent: {colors['accent']};
-      --success: {colors['success']};
-      --warning: {colors['warning']};
-      --error: {colors['error']};
-    }}
-    """
-
-    base = base_css()
-    page_bg = """
-    .stApp {{
-        background: radial-gradient(1200px 800px at 20% 10%, var(--surface), var(--bg) 60%);
-        color: var(--text);
-    }}
-    """
-
-    # Streamlit UI finetuning
-    ui = """
-    /* Cards/containers */
-    .stApp div[data-testid="stVerticalBlock"] > div, .stApp .stTabs {{
-        color: var(--text);
-    }}
-    /* Badges */
-    .badge {{
-        border:1px solid var(--border);
-        padding:4px 10px; border-radius:999px; font-size:0.9rem;
-        background: var(--card); color: var(--text);
-        box-shadow: 0 1px 0 rgba(0,0,0,.02), 0 1px 2px rgba(0,0,0,.04);
-    }}
-    /* Appbar */
-    .appbar {{ display:flex; align-items:center; margin-bottom:8px; font-weight:600; }}
-    .appbar-left  {{ display:flex; align-items:center; gap:.5rem; color: var(--text); }}
-    .appbar-mid   {{ display:flex; justify-content:center; }}
-    .appbar-right {{ display:flex; justify-content:flex-end; align-items:center; gap:.5rem; }}
-
-    /* Buttons */
-    .stButton > button.kv-button, .stButton > button {{
-        background: var(--primary) !important;
-        color: var(--primary-contrast) !important;
-        border: 1px solid color-mix(in srgb, var(--primary) 70%, #000 0%) !important;
-        border-radius: 10px !important;
-        box-shadow: 0 4px 14px rgba(0,0,0,0.08) !important;
-    }}
-    .stButton > button:hover {{
-        filter: brightness(1.05);
-        transform: translateY(-1px);
-        transition: all .15s ease;
-    }}
-    .stButton > button:disabled {{
-        opacity: .5 !important;
-        cursor: not-allowed !important;
-    }}
-
-    /* Inputs */
-    .stTextInput > div > div > input,
-    .stNumberInput input,
-    .stDateInput input,
-    .stSelectbox > div > div,
-    .stMultiSelect > div > div {{
-        background: var(--card) !important;
-        color: var(--text) !important;
-        border: 1px solid var(--border) !important;
-        border-radius: 10px !important;
-    }}
-
-    /* Tabs */
-    .stTabs [data-baseweb="tab-list"] button[role="tab"] {{
-        color: var(--muted);
-        border-bottom: 2px solid transparent;
-    }}
-    .stTabs [data-baseweb="tab-list"] button[role="tab"][aria-selected="true"] {{
-        color: var(--text);
-        border-bottom: 2px solid var(--accent);
-    }}
-
-    /* Dataframe headers */
-    .stDataFrame thead tr th {{
-        background: color-mix(in srgb, var(--card) 80%, var(--accent) 20%);
-        color: var(--text);
-    }}
-
-    /* Alerts */
-    .stAlert div[role="alert"] {{
-        border:1px solid var(--border);
-        background: var(--card);
-        color: var(--text);
-    }}
-    .stAlert [data-testid="stMarkdown"] strong {{ color: var(--text); }}
-
-    /* Metrics */
-    [data-testid="stMetricValue"], [data-testid="stMetricDelta"] {{
-        color: var(--text);
-    }}
-    """
-
-    st.markdown(f"<style>{css_vars}{page_bg}{base}{ui}</style>", unsafe_allow_html=True)
-
-# ──────────────────────────────
-# Supabase client
-# ──────────────────────────────
-@st.cache_resource
-def get_client() -> Client:
-    url = st.secrets["supabase"]["url"]
-    key = st.secrets["supabase"]["anon_key"]
-    return create_client(url, key)
-
-sb = get_client()
-
-# ──────────────────────────────
-# Styling
-# ──────────────────────────────
 def base_css() -> str:
-    # minimal; rest via theme
     return """
     .appbar { display:flex; align-items:center; margin-bottom:8px; font-weight:600; }
     .appbar-left  { display:flex; align-items:center; gap:.5rem; }
@@ -181,8 +53,125 @@ def base_css() -> str:
     .badge { border:1px solid var(--border); padding:4px 10px; border-radius:999px; font-size:0.9rem; background:var(--card); }
     """
 
-# injecteer thema nu al (voor de rest van de UI)
+def inject_theme():
+    theme = _merge_theme(THEME_DEFAULTS, st.secrets.get("theme"))
+    css_vars = f"""
+    :root {{
+      --bg:{theme['bg']}; --surface:{theme['surface']}; --card:{theme['card']}; --border:{theme['border']};
+      --text:{theme['text']}; --muted:{theme['muted']};
+      --primary:{theme['primary']}; --primary-contrast:{theme['primary_contrast']};
+      --accent:{theme['accent']}; --success:{theme['success']}; --warning:{theme['warning']}; --error:{theme['error']};
+    }}
+    """
+    page = """
+    .stApp{ background: radial-gradient(1200px 800px at 20% 10%, var(--surface), var(--bg) 60%); color: var(--text); }
+    .stButton > button{
+        background: var(--primary) !important; color: var(--primary-contrast) !important;
+        border: 1px solid var(--primary) !important; border-radius: 10px !important;
+        box-shadow: 0 4px 14px rgba(0,0,0,.08) !important; transition: all .15s ease;
+    }
+    .stButton > button:hover{ filter:brightness(1.05); transform: translateY(-1px); }
+    .stButton > button:disabled{ opacity:.5 !important; cursor:not-allowed !important; }
+    .stTextInput input, .stNumberInput input, .stDateInput input,
+    .stSelectbox > div > div, .stMultiSelect > div > div{
+        background:var(--card)!important; color:var(--text)!important; border:1px solid var(--border)!important; border-radius:10px!important;
+    }
+    .stTabs [role="tab"]{ color:var(--muted); border-bottom:2px solid transparent; }
+    .stTabs [role="tab"][aria-selected="true"]{ color:var(--text); border-bottom:2px solid var(--accent); }
+    .stDataFrame thead tr th{ background: color-mix(in srgb, var(--card) 80%, var(--accent) 20%); color:var(--text); }
+    .stAlert [role="alert"]{ border:1px solid var(--border); background:var(--card); color:var(--text); }
+    """
+    st.markdown(f"<style>{css_vars}{base_css()}{page}</style>", unsafe_allow_html=True)
+
 inject_theme()
+
+# ──────────────────────────────
+# Supabase client (robust + connectivity check)
+# ──────────────────────────────
+@st.cache_resource
+def get_client() -> Client:
+    import os
+    supa = st.secrets.get("supabase", {})
+    url = supa.get("url") or os.getenv("SUPABASE_URL")
+    key = supa.get("anon_key") or os.getenv("SUPABASE_ANON_KEY")
+
+    missing = []
+    if not url: missing.append("supabase.url (of SUPABASE_URL)")
+    if not key: missing.append("supabase.anon_key (of SUPABASE_ANON_KEY)")
+    if missing:
+        st.error("Supabase configuratie ontbreekt:\n- " + "\n- ".join(missing))
+        st.stop()
+
+    # Client aanmaken
+    try:
+        client = create_client(url, key)
+    except Exception as e:
+        st.error(f"Kon Supabase client niet maken: {e}")
+        st.stop()
+
+    # Korte connectiviteitstest met kleine timeout/retry
+    try:
+        _probe_supabase(client)
+    except Exception as e:
+        st.error(
+            "Kon geen netwerkverbinding maken met Supabase. Mogelijke oorzaken:\n"
+            "- Verkeerde `supabase.url`\n- Tijdelijke netwerk/DNS/SSL-storing\n"
+            "- Outbound internet hapering in hosting\n\nDetails: " + str(e)
+        )
+        st.stop()
+
+    return client
+
+def _probe_supabase(client: Client):
+    # Probe: minimal select op een lichte system view of eigen tabellen.
+    # We proberen users te vragen met limit(1); als de tabel niet bestaat is dat ook ok (we willen alleen netwerk).
+    try:
+        client.postgrest.auth.token  # touch to ensure auth is set
+    except Exception:
+        pass
+
+    try:
+        client.table("users").select("username").limit(1).execute()
+    except APIError:
+        # DB is bereikbaar (network ok), maar policy/structuur kan fout zijn: dat is geen netwerffout.
+        return
+    except (httpx.ConnectError, httpx.ReadTimeout) as e:
+        raise RuntimeError(f"Network to Supabase failed: {e}") from e
+    except Exception:
+        # Andere errors negeren hier; belangrijkste is dat netwerk lukt of APIError terugkomt.
+        return
+
+sb = get_client()
+
+# Helper: generieke retry voor DB-calls
+def run_db(fn, *, tries=3, backoff=0.7, what="database call"):
+    last_err = None
+    for i in range(1, tries+1):
+        try:
+            return fn()
+        except (httpx.ConnectError, httpx.ReadTimeout) as e:
+            last_err = e
+            if i < tries:
+                time.sleep(backoff * i)
+                continue
+            st.error(f"Netwerkfout bij {what}: {e}")
+            st.stop()
+        except APIError as e:
+            # Toon een duidelijke, maar niet-gevoelige melding
+            st.error(
+                f"API-fout bij {what}. Controleer of de tabel bestaat en of RLS/policies toegang geven "
+                f"voor de anon key (select/insert/update waar nodig)."
+            )
+            st.caption(str(e))
+            st.stop()
+        except Exception as e:
+            last_err = e
+            if i < tries:
+                time.sleep(backoff * i)
+                continue
+            st.error(f"Onverwachte fout bij {what}: {e}")
+            st.stop()
+    return None
 
 # ──────────────────────────────
 # Constants & "noodslot"
@@ -190,8 +179,6 @@ inject_theme()
 MAX_ATTEMPTS = 5
 LOCK_MINUTES = 15
 ALLOWED_ROLES = {"admin", "user", "viewer"}
-
-# NOODSLOT: zet in secrets [app] force_readonly=true om iedereen read-only te maken
 FORCE_READONLY = bool(st.secrets.get("app", {}).get("force_readonly", False))
 
 # ──────────────────────────────
@@ -205,7 +192,6 @@ def current_role() -> str:
     return normalize_role(st.session_state.get("role"))
 
 def is_viewer_effective() -> bool:
-    # noodslot domineert
     return FORCE_READONLY or (current_role() == "viewer")
 
 def _ensure_not_viewer():
@@ -213,32 +199,37 @@ def _ensure_not_viewer():
         raise Exception("Viewer/read-only modus: schrijven is geblokkeerd.")
 
 # ──────────────────────────────
-# DB helpers
+# DB helpers (allemaal via run_db)
 # ──────────────────────────────
 def get_user(username: str):
-    res = sb.table("users").select("*").eq("username", username).limit(1).execute()
-    return (res.data or [None])[0]
+    return run_db(
+        lambda: sb.table("users").select("*").eq("username", username).limit(1).execute(),
+        what="users select",
+    ).data and run_db(
+        lambda: sb.table("users").select("*").eq("username", username).limit(1).execute(),
+        what="users select (read)",
+    ).data[0] or None
 
 def list_admin_usernames() -> list[str]:
-    res = sb.table("users").select("username, role").eq("role","admin").execute()
+    res = run_db(lambda: sb.table("users").select("username, role").eq("role","admin").execute(), what="users (admins)")
     return [r["username"] for r in (res.data or [])]
 
 def set_password(username: str, new_password: str):
     _ensure_not_viewer()
     hashed = bcrypt.hashpw(new_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-    sb.table("users").update({
-        "password_hash": hashed,
-        "failed_attempts": 0,
-        "locked_until": None
-    }).eq("username", username).execute()
+    run_db(lambda: sb.table("users").update({
+        "password_hash": hashed, "failed_attempts": 0, "locked_until": None
+    }).eq("username", username).execute(), what="users update (password)")
 
 def update_user_role(username: str, new_role: str):
     _ensure_not_viewer()
-    sb.table("users").update({"role": normalize_role(new_role)}).eq("username", username).execute()
+    run_db(lambda: sb.table("users").update({"role": normalize_role(new_role)}).eq("username", username).execute(),
+           what="users update (role)")
 
 def clear_lock(username: str):
     _ensure_not_viewer()
-    sb.table("users").update({"failed_attempts": 0, "locked_until": None}).eq("username", username).execute()
+    run_db(lambda: sb.table("users").update({"failed_attempts": 0, "locked_until": None}).eq("username", username).execute(),
+           what="users update (clear lock)")
 
 def register_failed_attempt(username: str):
     u = get_user(username)
@@ -247,10 +238,12 @@ def register_failed_attempt(username: str):
     attempts = int(u.get("failed_attempts") or 0) + 1
     if attempts >= MAX_ATTEMPTS:
         until = (dt.utcnow() + timedelta(minutes=LOCK_MINUTES)).isoformat()
-        sb.table("users").update({"failed_attempts": 0, "locked_until": until}).eq("username", username).execute()
+        run_db(lambda: sb.table("users").update({"failed_attempts": 0, "locked_until": until}).eq("username", username).execute(),
+               what="users update (lock)")
         return MAX_ATTEMPTS, until
     else:
-        sb.table("users").update({"failed_attempts": attempts}).eq("username", username).execute()
+        run_db(lambda: sb.table("users").update({"failed_attempts": attempts}).eq("username", username).execute(),
+               what="users update (failed attempts)")
         return attempts, None
 
 def is_locked(urow):
@@ -265,37 +258,35 @@ def is_locked(urow):
         return False, None
 
 def list_duikers() -> list[str]:
-    res = sb.table("duikers").select("naam").order("naam").execute()
+    res = run_db(lambda: sb.table("duikers").select("naam").order("naam").execute(), what="duikers select")
     return [r["naam"] for r in (res.data or [])]
 
 def add_duiker(name: str):
     _ensure_not_viewer()
-    sb.table("duikers").insert({"naam": name}).execute()
+    run_db(lambda: sb.table("duikers").insert({"naam": name}).execute(), what="duikers insert")
 
 def delete_duikers(names: list[str]) -> tuple[bool, int, str | None]:
-    if not names:
-        return True, 0, None
+    if not names: return True, 0, None
     try:
         _ensure_not_viewer()
-        sb.table("duikers").delete().in_("naam", names).execute()
+        run_db(lambda: sb.table("duikers").delete().in_("naam", names).execute(), what="duikers delete")
         return True, len(names), None
     except Exception as e:
         return False, 0, str(e)
 
 def list_plaatsen() -> list[str]:
-    res = sb.table("duikplaatsen").select("plaats").order("plaats").execute()
+    res = run_db(lambda: sb.table("duikplaatsen").select("plaats").order("plaats").execute(), what="duikplaatsen select")
     return [r["plaats"] for r in (res.data or [])]
 
 def add_plaats(plaats: str):
     _ensure_not_viewer()
-    sb.table("duikplaatsen").insert({"plaats": plaats}).execute()
+    run_db(lambda: sb.table("duikplaatsen").insert({"plaats": plaats}).execute(), what="duikplaatsen insert")
 
 def delete_plaatsen(plaatsen: list[str]) -> tuple[bool, int, str | None]:
-    if not plaatsen:
-        return True, 0, None
+    if not plaatsen: return True, 0, None
     try:
         _ensure_not_viewer()
-        sb.table("duikplaatsen").delete().in_("plaats", plaatsen).execute()
+        run_db(lambda: sb.table("duikplaatsen").delete().in_("plaats", plaatsen).execute(), what="duikplaatsen delete")
         return True, len(plaatsen), None
     except Exception as e:
         return False, 0, str(e)
@@ -303,71 +294,62 @@ def delete_plaatsen(plaatsen: list[str]) -> tuple[bool, int, str | None]:
 def save_duiken(rows):
     if rows:
         _ensure_not_viewer()
-        sb.table("duiken").insert(rows).execute()
+        run_db(lambda: sb.table("duiken").insert(rows).execute(), what="duiken insert")
 
 def fetch_duiken(filters=None) -> pd.DataFrame:
-    q = sb.table("duiken").select("*")
-    if filters:
-        for k, v in filters.items():
-            if v is None:
-                continue
-            if k == "datum_eq":
-                q = q.eq("datum", v)
-            elif k == "plaats_eq":
-                q = q.eq("plaats", v)
-            elif k == "duikcode_eq":
-                q = q.eq("duikcode", v)
-            elif k == "datum_gte":
-                q = q.gte("datum", v)
-            elif k == "datum_lte":
-                q = q.lte("datum", v)
-            elif k == "duiker_eq":
-                q = q.eq("duiker", v)
-    res = q.order("datum", desc=True).order("plaats").order("duikcode").order("duiker").execute()
+    def _go():
+        q = sb.table("duiken").select("*")
+        if filters:
+            for k, v in filters.items():
+                if v is None: continue
+                if k == "datum_eq": q = q.eq("datum", v)
+                elif k == "plaats_eq": q = q.eq("plaats", v)
+                elif k == "duikcode_eq": q = q.eq("duikcode", v)
+                elif k == "datum_gte": q = q.gte("datum", v)
+                elif k == "datum_lte": q = q.lte("datum", v)
+                elif k == "duiker_eq": q = q.eq("duiker", v)
+        return q.order("datum", desc=True).order("plaats").order("duikcode").order("duiker").execute()
+
+    res = run_db(_go, what="duiken select")
     return pd.DataFrame(res.data or [])
 
 def delete_duiken_by_ids(ids):
     if ids:
         _ensure_not_viewer()
-        sb.table("duiken").delete().in_("id", ids).execute()
+        run_db(lambda: sb.table("duiken").delete().in_("id", ids).execute(), what="duiken delete")
 
 def delete_users(usernames: list[str]) -> tuple[bool, int, str | None]:
-    if not usernames:
-        return True, 0, None
+    if not usernames: return True, 0, None
     try:
         _ensure_not_viewer()
-        sb.table("users").delete().in_("username", usernames).execute()
+        run_db(lambda: sb.table("users").delete().in_("username", usernames).execute(), what="users delete")
         return True, len(usernames), None
     except Exception as e:
         return False, 0, str(e)
 
-# ── Admin-init zonder upsert ──
 def ensure_admin_exists():
-    """Maakt 'admin'/'1234' alleen aan als die nog niet bestaat."""
+    # maak admin / 1234 aan als die niet bestaat; vangt policies/netwerk netjes af
     try:
-        res = sb.table("users").select("username").eq("username", "admin").limit(1).execute()
-        if res.data:
+        res = run_db(lambda: sb.table("users").select("username").eq("username", "admin").limit(1).execute(),
+                     what="users select (check admin)")
+        if res and res.data:
             return
     except Exception:
         pass
     try:
         hashed = bcrypt.hashpw("1234".encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-        sb.table("users").insert({
-            "username": "admin",
-            "password_hash": hashed,
-            "role": "admin",
-            "failed_attempts": 0,
-            "locked_until": None,
-        }).execute()
+        run_db(lambda: sb.table("users").insert({
+            "username":"admin","password_hash":hashed,"role":"admin","failed_attempts":0,"locked_until":None
+        }).execute(), what="users insert (admin)")
         st.info("Standaard admin aangemaakt: admin / 1234 — wijzig dit wachtwoord in Beheer.")
     except Exception:
-        st.warning("Kon admin niet automatisch aanmaken. Controleer RLS/policies op 'users' en herlaad.")
+        st.warning("Kon admin niet automatisch aanmaken. Controleer RLS/policies op 'users'.")
 
 # ──────────────────────────────
 # UI helpers
 # ──────────────────────────────
 def appbar(suffix: str):
-    col1, col2, col3 = st.columns([5, 3, 2])
+    col1, col2, col3 = st.columns([5,3,2])
     with col1:
         st.markdown("<div class='appbar-left'>ANWW Duikapp</div>", unsafe_allow_html=True)
     with col2:
@@ -390,15 +372,12 @@ def login_page():
 
     st.markdown(f"🧩 Build: **{APP_BUILD}**", unsafe_allow_html=True)
 
-    # Klein logo boven login (optioneel via secrets)
     login_logo_url = (st.secrets.get("app", {}).get("login_logo_url", "") or "").strip()
     if login_logo_url:
-        c1, c2, c3 = st.columns([1, 2, 1])
+        c1, c2, c3 = st.columns([1,2,1])
         with c2:
-            try:
-                st.image(login_logo_url, width=240)
-            except Exception:
-                st.title("ANWW Duikapp")
+            try: st.image(login_logo_url, width=240)
+            except Exception: st.title("ANWW Duikapp")
     else:
         st.title("ANWW Duikapp")
 
@@ -427,10 +406,8 @@ def login_page():
     ok = False
     ph = (user.get("password_hash") or "").encode("utf-8")
     if ph:
-        try:
-            ok = bcrypt.checkpw(p.encode("utf-8"), ph)
-        except Exception:
-            ok = False
+        try: ok = bcrypt.checkpw(p.encode("utf-8"), ph)
+        except Exception: ok = False
 
     if ok:
         clear_lock(u)
@@ -448,7 +425,6 @@ def login_page():
 
 def page_duiken():
     role = current_role()
-    # Viewer: geen toegang
     if is_viewer_effective():
         st.error("Alleen-lezen gebruiker: geen toegang tot 'Duiken invoeren'.")
         return
@@ -483,7 +459,6 @@ def page_duiken():
     duikers = list_duikers()
     sel = st.multiselect("Kies duikers", duikers, key="duiken_sel_duikers")
 
-    # Alleen admin mag stamgegevens toevoegen
     if role == "admin":
         with st.expander("Duikplaats/duiker toevoegen"):
             c1, c2 = st.columns(2)
@@ -537,7 +512,6 @@ def page_duiken():
                     st.rerun()
 
 def page_overzicht():
-    role = current_role()
     appbar("overzicht")
     df = fetch_duiken()
     if df.empty:
@@ -598,9 +572,7 @@ def page_overzicht():
     else:
         edited = st.data_editor(
             f_with_id[["Selecteer","RowId","Datum","Plaats","Duiker","Duikcode"]],
-            num_rows="fixed",
-            use_container_width=True,
-            hide_index=True,
+            num_rows="fixed", use_container_width=True, hide_index=True,
             column_config={"Selecteer": st.column_config.CheckboxColumn("Selecteer")}
         )
         to_delete_ids = edited.loc[edited["Selecteer"]==True, "RowId"].astype(int).tolist()
@@ -609,7 +581,6 @@ def page_overzicht():
             st.success(f"Verwijderd: {len(to_delete_ids)} rij(en).")
             st.rerun()
 
-    # Export – toegestaan voor alle rollen (ook viewer)
     out = io.BytesIO()
     with pd.ExcelWriter(out, engine="openpyxl") as w:
         view.to_excel(w, index=False, sheet_name="Duiken")
@@ -661,7 +632,6 @@ def page_afrekening():
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 def page_beheer():
-    # Alleen admins
     if is_viewer_effective() or current_role() != "admin":
         st.error("Toegang geweigerd — alleen admins.")
         return
@@ -669,9 +639,9 @@ def page_beheer():
     appbar("beheer")
     tabs = st.tabs(["Gebruikers","Duikers","Duikplaatsen","Back-up & export"])
 
-    # Gebruikers
     with tabs[0]:
-        res = sb.table("users").select("username, role, failed_attempts, locked_until").order("username").execute()
+        res = run_db(lambda: sb.table("users").select("username, role, failed_attempts, locked_until").order("username").execute(),
+                     what="users select (beheer)")
         users_df = pd.DataFrame(res.data or [])
         st.dataframe(users_df, use_container_width=True, hide_index=True)
 
@@ -720,10 +690,10 @@ def page_beheer():
             if u and p and (get_user(u) is None):
                 hashed = bcrypt.hashpw(p.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
                 try:
-                    sb.table("users").insert({
+                    run_db(lambda: sb.table("users").insert({
                         "username":u,"password_hash":hashed,"role":normalize_role(r),
                         "failed_attempts":0,"locked_until":None
-                    }).execute()
+                    }).execute(), what="users insert (beheer)")
                     st.success(f"Gebruiker '{u}' toegevoegd ({r})."); st.rerun()
                 except Exception as e:
                     st.error(f"Toevoegen mislukt: {e}")
@@ -732,7 +702,7 @@ def page_beheer():
 
         st.divider()
         st.subheader("Wachtwoord resetten / Deblokkeren")
-        res = sb.table("users").select("username").order("username").execute()
+        res = run_db(lambda: sb.table("users").select("username").order("username").execute(), what="users select (pw)")
         all_users_pw = [row["username"] for row in (res.data or [])]
         sel_user = st.selectbox("Kies gebruiker", all_users_pw)
         new_pw = st.text_input("Nieuw wachtwoord")
@@ -749,7 +719,6 @@ def page_beheer():
                 try: clear_lock(sel_user); st.success(f"Account van '{sel_user}' is gedeblokkeerd.")
                 except Exception as e: st.error(f"Deblokkeren mislukt: {e}")
 
-    # Duikers
     with tabs[1]:
         duikers = list_duikers()
         st.dataframe(pd.DataFrame({"Naam": duikers}), use_container_width=True, hide_index=True)
@@ -770,7 +739,6 @@ def page_beheer():
             else:
                 st.warning("Leeg of al bestaand.")
 
-    # Duikplaatsen
     with tabs[2]:
         plaatsen = list_plaatsen()
         st.dataframe(pd.DataFrame({"Plaats": plaatsen}), use_container_width=True, hide_index=True)
@@ -791,16 +759,15 @@ def page_beheer():
             else:
                 st.warning("Leeg of al bestaand.")
 
-    # Back-up & export
     with tabs[3]:
         st.info("Alle data wordt automatisch opgeslagen in Supabase. "
                 "Hier kun je een back-up (Excel) downloaden van alle tabellen.")
         if st.button("Maak back-up (Excel)"):
             out = io.BytesIO()
-            users = sb.table("users").select("*").execute()
-            duikers = sb.table("duikers").select("*").execute()
-            plaatsen = sb.table("duikplaatsen").select("*").execute()
-            duiken = sb.table("duiken").select("*").execute()
+            users = run_db(lambda: sb.table("users").select("*").execute(), what="users select (backup)")
+            duikers = run_db(lambda: sb.table("duikers").select("*").execute(), what="duikers select (backup)")
+            plaatsen = run_db(lambda: sb.table("duikplaatsen").select("*").execute(), what="duikplaatsen select (backup)")
+            duiken = run_db(lambda: sb.table("duiken").select("*").execute(), what="duiken select (backup)")
             df_users = pd.DataFrame(users.data or [])
             df_duikers = pd.DataFrame(duikers.data or [])
             df_plaatsen = pd.DataFrame(plaatsen.data or [])
@@ -829,7 +796,7 @@ def main():
         login_page()
         return
 
-    # Live rol refresh (voorkomt 'vastzitten' na wijziging in DB)
+    # Live rol refresh
     try:
         urow = get_user(st.session_state.get("username", ""))
         if urow:
@@ -839,7 +806,6 @@ def main():
 
     role = current_role()
 
-    # Rolbadge (visuele check)
     st.markdown(
         f"<div class='badge'>Ingelogd als: <b>{st.session_state.get('username','?')}</b> · Rol: <b>{role}</b>"
         + (" · READ-ONLY (noodslot)" if FORCE_READONLY else "")
@@ -859,7 +825,6 @@ def main():
         with tabs[1]: page_overzicht()
         with tabs[2]: page_afrekening()
     else:
-        # viewer of noodslot: alleen lezen
         tabs = st.tabs(["Overzicht", "Afrekening"])
         with tabs[0]: page_overzicht()
         with tabs[1]: page_afrekening()
