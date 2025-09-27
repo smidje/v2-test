@@ -328,6 +328,34 @@ def delete_users(usernames: list[str]) -> tuple[bool, int, str | None]:
         return False, 0, str(e)
 
 def ensure_admin_exists():
+    # ──────────────────────────────
+# Duiker-naam helpers (voornaam + naam)
+# ──────────────────────────────
+def _fullname(vn: str | None, nn: str | None) -> str:
+    vn = (vn or "").strip()
+    nn = (nn or "").strip()
+    return f"{vn} {nn}".strip() if (vn or nn) else ""
+
+def _split_guess(full: str) -> tuple[str, str]:
+    """
+    Eenvoudige heuristiek: eerste token = voornaam, rest = naam.
+    Werkt goed genoeg voor 'Jan Jansen', 'Anne de Vries'.
+    """
+    s = (full or "").strip()
+    if not s:
+        return "", ""
+    parts = s.split()
+    if len(parts) == 1:
+        return "", parts[0]
+    return parts[0], " ".join(parts[1:])
+
+def add_duiker_split(voornaam: str, naam: str):
+    _ensure_not_viewer()
+    run_db(lambda: sb.table("duikers").insert({
+        "voornaam": (voornaam or "").strip(),
+        "naam": (naam or "").strip()
+    }).execute(), what="duikers insert (split)")
+
     # maak admin / 1234 aan als die niet bestaat; vangt policies/netwerk netjes af
     try:
         res = run_db(lambda: sb.table("users").select("username").eq("username", "admin").limit(1).execute(),
