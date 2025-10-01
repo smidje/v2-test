@@ -1,5 +1,6 @@
-# app.py — ANWW Duikapp (voornaam/achternaam + afrekening met blokken & instelbaar restsaldo)
-# Gebaseerd op je aangeleverde app; alleen wijzigingen toegevoegd die je vroeg.
+# app.py — ANWW Duikapp (duikers + duikplaatsen toevoegen, fixed indentation & delete_users)
+# Build tag
+APP_BUILD = "v2025-10-01-ANWW-05"
 
 import streamlit as st
 from datetime import datetime as dt
@@ -14,8 +15,6 @@ from supabase import create_client, Client
 from postgrest.exceptions import APIError
 import httpx  # voor ConnectError/ReadTimeout
 
-APP_BUILD = "v2025-09-30-ANWW-04+splitname-blocks-restsaldo"
-
 # ──────────────────────────────
 # Basisconfig & thema
 # ──────────────────────────────
@@ -28,9 +27,10 @@ THEME_DEFAULTS = {
 }
 
 def _merge_theme(defaults: dict, overrides: dict | None) -> dict:
-    if not overrides: return defaults
+    if not overrides:
+        return defaults
     out = defaults.copy()
-    for k,v in overrides.items():
+    for k, v in overrides.items():
         if isinstance(v, str) and v.strip():
             out[k] = v.strip()
     return out
@@ -87,8 +87,10 @@ def get_client() -> Client:
     key = supa.get("anon_key") or os.getenv("SUPABASE_ANON_KEY")
 
     missing = []
-    if not url: missing.append("supabase.url (of SUPABASE_URL)")
-    if not key: missing.append("supabase.anon_key (of SUPABASE_ANON_KEY)")
+    if not url:
+        missing.append("supabase.url (of SUPABASE_URL)")
+    if not key:
+        missing.append("supabase.anon_key (of SUPABASE_ANON_KEY)")
     if missing:
         st.error("Supabase configuratie ontbreekt:\n- " + "\n- ".join(missing))
         st.stop()
@@ -99,7 +101,6 @@ def get_client() -> Client:
         st.error(f"Kon Supabase client niet maken: {e}")
         st.stop()
 
-    # mini probe
     try:
         client.table("users").select("username").limit(1).execute()
     except Exception:
@@ -109,10 +110,9 @@ def get_client() -> Client:
 sb = get_client()
 
 # Retry wrapper
-
 def run_db(fn, *, tries=3, backoff=0.6, what="database call"):
     last_err = None
-    for i in range(1, tries+1):
+    for i in range(1, tries + 1):
         try:
             return fn()
         except (httpx.ConnectError, httpx.ReadTimeout) as e:
@@ -123,9 +123,7 @@ def run_db(fn, *, tries=3, backoff=0.6, what="database call"):
             st.error(f"Netwerkfout bij {what}: {e}")
             st.stop()
         except APIError as e:
-            st.error(
-                f"API-fout bij {what}. Controleer tabel/policy/RLS voor anon key."
-            )
+            st.error("API-fout bij {what}. Controleer tabel/policy/RLS voor anon key.")
             st.caption(str(e))
             st.stop()
         except Exception as e:
@@ -145,19 +143,15 @@ LOCK_MINUTES = 15
 ALLOWED_ROLES = {"admin", "user", "viewer"}
 FORCE_READONLY = bool(st.secrets.get("app", {}).get("force_readonly", False))
 
-
 def normalize_role(raw) -> str:
     r = (raw or "user").strip().lower()
     return r if r in ALLOWED_ROLES else "user"
 
-
 def current_role() -> str:
     return normalize_role(st.session_state.get("role"))
 
-
 def is_viewer_effective() -> bool:
     return FORCE_READONLY or (current_role() == "viewer")
-
 
 def _ensure_not_viewer():
     if is_viewer_effective():
@@ -166,160 +160,182 @@ def _ensure_not_viewer():
 # ──────────────────────────────
 # Helpers naam-splitting
 # ──────────────────────────────
-
 def _fullname(vn: str | None, an: str | None) -> str:
-    vn = (vn or "").strip(); an = (an or "").strip()
+    vn = (vn or "").strip()
+    an = (an or "").strip()
     return (vn + (" " if vn and an else "") + an).strip()
 
-
-def _split_guess(full: str) -> tuple[str,str]:
+def _split_guess(full: str) -> tuple[str, str]:
     s = (full or "").strip()
-    if not s: return "",""
+    if not s:
+        return "", ""
     parts = s.split()
-    if len(parts)==1: return "", parts[0]
+    if len(parts) == 1:
+        return "", parts[0]
     return parts[0], " ".join(parts[1:])
 
 # ──────────────────────────────
 # DB helpers (users/duikers/plaatsen/duiken/afrekeningen)
 # ──────────────────────────────
-
 def get_user(username: str):
     res = run_db(lambda: sb.table("users").select("*").eq("username", username).limit(1).execute(),
                  what="users select")
     rows = res.data or []
     return rows[0] if rows else None
 
-
 def list_admin_usernames() -> list[str]:
-    res = run_db(lambda: sb.table("users").select("username, role").eq("role","admin").execute(), what="users (admins)")
+    res = run_db(lambda: sb.table("users").select("username, role").eq("role", "admin").execute(),
+                 what="users (admins)")
     return [r["username"] for r in (res.data or [])]
-
 
 def set_password(username: str, new_password: str):
     _ensure_not_viewer()
     hashed = bcrypt.hashpw(new_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-    run_db(lambda: sb.table("users").update({"password_hash": hashed, "failed_attempts": 0, "locked_until": None})
-           .eq("username", username).execute(), what="users update (password)")
-
+    run_db(lambda: sb.table("users").update({
+        "password_hash": hashed, "failed_attempts": 0, "locked_until": None
+    }).eq("username", username).execute(), what="users update (password)")
 
 def update_user_role(username: str, new_role: str):
     _ensure_not_viewer()
-    run_db(lambda: sb.table("users").update({"role": normalize_role(new_role)}).eq("username", username).execute(),
-           what="users update (role)")
-
+    run_db(lambda: sb.table("users").update({"role": normalize_role(new_role)})
+           .eq("username", username).execute(), what="users update (role)")
 
 def clear_lock(username: str):
     _ensure_not_viewer()
-    run_db(lambda: sb.table("users").update({"failed_attempts": 0, "locked_until": None}).eq("username", username).execute(),
-           what="users update (unlock)")
+    run_db(lambda: sb.table("users").update({"failed_attempts": 0, "locked_until": None})
+           .eq("username", username).execute(), what="users update (unlock)")
+
+def delete_users(usernames: list[str]) -> tuple[bool, int, str | None]:
+    """Gebruikers bulk verwijderen."""
+    if not usernames:
+        return True, 0, None
+    try:
+        _ensure_not_viewer()
+        run_db(lambda: sb.table("users").delete().in_("username", usernames).execute(),
+               what="users delete")
+        return True, len(usernames), None
+    except Exception as e:
+        return False, 0, str(e)
 
 # ——— DU I K E R S ———
-
 def list_duikers_weergave() -> list[str]:
-    """Retourneert combinaties 'Achternaam, Voornaam' indien beschikbaar, anders legacy 'naam'. Gesorteerd op achternaam."""
+    """Geef labels 'Achternaam, Voornaam' indien beschikbaar, anders legacy 'naam'. Gesorteerd op achternaam."""
     try:
-        res = run_db(lambda: sb.table("duikers").select("voornaam, achternaam, naam, rest_saldo").execute(), what="duikers select (split)")
+        res = run_db(lambda: sb.table("duikers").select("voornaam, achternaam, naam, rest_saldo").execute(),
+                     what="duikers select (split)")
         rows = res.data or []
         out = []
         for r in rows:
             vn, an = r.get("voornaam"), r.get("achternaam")
             if (vn is not None) or (an is not None):
-                label = f"{(an or '').strip()}, {(vn or '').strip()}".strip(', ')
+                label = f"{(an or '').strip()}, {(vn or '').strip()}".strip(", ")
                 out.append(label)
             else:
                 out.append((r.get("naam") or "").strip())
-        def sort_key(x:str):
+
+        def sort_key(x: str):
             if "," in x:
-                an, vn = [p.strip() for p in x.split(",",1)]
+                an, vn = [p.strip() for p in x.split(",", 1)]
                 return (an.lower(), vn.lower())
             vn, an = _split_guess(x)
             return (an.lower(), vn.lower())
+
         return sorted([o for o in out if o], key=sort_key)
     except Exception:
-        res = run_db(lambda: sb.table("duikers").select("naam").order("naam").execute(), what="duikers select (legacy)")
+        res = run_db(lambda: sb.table("duikers").select("naam").order("naam").execute(),
+                     what="duikers select (legacy)")
         return [r["naam"] for r in (res.data or [])]
-
 
 def add_duiker_legacy(name: str):
     _ensure_not_viewer()
-    run_db(lambda: sb.table("duikers").insert({"naam": name}).execute(), what="duikers insert (legacy)")
-
+    run_db(lambda: sb.table("duikers").insert({"naam": name}).execute(),
+           what="duikers insert (legacy)")
 
 def add_duiker_split(vn: str, an: str, rest: float = 0.0):
     _ensure_not_viewer()
-    payload = {"voornaam": (vn or '').strip(), "achternaam": (an or '').strip(), "naam": _fullname(vn, an), "rest_saldo": float(rest)}
-    run_db(lambda: sb.table("duikers").insert(payload).execute(), what="duikers insert (split)")
-
+    payload = {"voornaam": (vn or "").strip(),
+               "achternaam": (an or "").strip(),
+               "naam": _fullname(vn, an),
+               "rest_saldo": float(rest)}
+    run_db(lambda: sb.table("duikers").insert(payload).execute(),
+           what="duikers insert (split)")
 
 def update_duiker_rest(vn: str, an: str, rest: float):
     _ensure_not_viewer()
     run_db(lambda: sb.table("duikers").update({"rest_saldo": float(rest)})
-           .eq("voornaam", (vn or '').strip()).eq("achternaam", (an or '').strip()).execute(),
+           .eq("voornaam", (vn or "").strip()).eq("achternaam", (an or "").strip()).execute(),
            what="duikers update rest")
 
-
 def delete_duikers(names_or_labels: list[str]) -> tuple[bool, int, str | None]:
-    if not names_or_labels: return True, 0, None
+    if not names_or_labels:
+        return True, 0, None
     try:
         _ensure_not_viewer()
         deleted = 0
         for disp in names_or_labels:
             if "," in disp:
-                an, vn = [p.strip() for p in disp.split(",",1)]
-                run_db(lambda: sb.table("duikers").delete().eq("voornaam", vn).eq("achternaam", an).execute(), what="duikers delete (split)")
+                an, vn = [p.strip() for p in disp.split(",", 1)]
+                run_db(lambda: sb.table("duikers").delete().eq("voornaam", vn).eq("achternaam", an).execute(),
+                       what="duikers delete (split)")
                 deleted += 1
             else:
-                run_db(lambda: sb.table("duikers").delete().eq("naam", disp).execute(), what="duikers delete (legacy)")
+                run_db(lambda: sb.table("duikers").delete().eq("naam", disp).execute(),
+                       what="duikers delete (legacy)")
                 deleted += 1
         return True, deleted, None
     except Exception as e:
         return False, 0, str(e)
 
 # ——— P L A A T S E N ———
-
 def list_plaatsen() -> list[str]:
-    res = run_db(lambda: sb.table("duikplaatsen").select("plaats").order("plaats").execute(), what="duikplaatsen select")
+    res = run_db(lambda: sb.table("duikplaatsen").select("plaats").order("plaats").execute(),
+                 what="duikplaatsen select")
     return [r["plaats"] for r in (res.data or [])]
-
 
 def add_plaats(plaats: str):
     _ensure_not_viewer()
-    run_db(lambda: sb.table("duikplaatsen").insert({"plaats": plaats}).execute(), what="duikplaatsen insert")
-
+    run_db(lambda: sb.table("duikplaatsen").insert({"plaats": plaats}).execute(),
+           what="duikplaatsen insert")
 
 def delete_plaatsen(plaatsen: list[str]) -> tuple[bool, int, str | None]:
-    if not plaatsen: return True, 0, None
+    if not plaatsen:
+        return True, 0, None
     try:
         _ensure_not_viewer()
-        run_db(lambda: sb.table("duikplaatsen").delete().in_("plaats", plaatsen).execute(), what="duikplaatsen delete")
+        run_db(lambda: sb.table("duikplaatsen").delete().in_("plaats", plaatsen).execute(),
+               what="duikplaatsen delete")
         return True, len(plaatsen), None
     except Exception as e:
         return False, 0, str(e)
 
 # ——— D U I K E N ———
-
 def save_duiken(rows):
     if rows:
         _ensure_not_viewer()
         run_db(lambda: sb.table("duiken").insert(rows).execute(), what="duiken insert")
-
 
 def fetch_duiken(filters=None) -> pd.DataFrame:
     def _go():
         q = sb.table("duiken").select("*")
         if filters:
             for k, v in filters.items():
-                if v is None: continue
-                if k == "datum_eq": q = q.eq("datum", v)
-                elif k == "plaats_eq": q = q.eq("plaats", v)
-                elif k == "duikcode_eq": q = q.eq("duikcode", v)
-                elif k == "datum_gte": q = q.gte("datum", v)
-                elif k == "datum_lte": q = q.lte("datum", v)
-                elif k == "duiker_eq": q = q.eq("duiker", v)
+                if v is None:
+                    continue
+                if k == "datum_eq":
+                    q = q.eq("datum", v)
+                elif k == "plaats_eq":
+                    q = q.eq("plaats", v)
+                elif k == "duikcode_eq":
+                    q = q.eq("duikcode", v)
+                elif k == "datum_gte":
+                    q = q.gte("datum", v)
+                elif k == "datum_lte":
+                    q = q.lte("datum", v)
+                elif k == "duiker_eq":
+                    q = q.eq("duiker", v)
         return q.order("datum", desc=True).order("plaats").order("duikcode").order("duiker").execute()
     res = run_db(_go, what="duiken select")
     return pd.DataFrame(res.data or [])
-
 
 def delete_duiken_by_ids(ids):
     if ids:
@@ -327,17 +343,16 @@ def delete_duiken_by_ids(ids):
         run_db(lambda: sb.table("duiken").delete().in_("id", ids).execute(), what="duiken delete")
 
 # ——— A F R E K E N I N G E N ———
-
 def get_rest_saldo(vn: str, an: str) -> float:
-    res = run_db(lambda: sb.table("duikers").select("rest_saldo").eq("voornaam", (vn or '').strip()).eq("achternaam", (an or '').strip()).limit(1).execute(),
+    res = run_db(lambda: sb.table("duikers").select("rest_saldo")
+                 .eq("voornaam", (vn or "").strip())
+                 .eq("achternaam", (an or "").strip()).limit(1).execute(),
                  what="duikers rest_saldo")
     rows = res.data or []
     return float((rows[0] or {}).get("rest_saldo", 0)) if rows else 0.0
 
-
 def set_rest_saldo(vn: str, an: str, value: float):
     update_duiker_rest(vn, an, value)
-
 
 def insert_afrekening(row: dict):
     run_db(lambda: sb.table("afrekeningen").insert(row).execute(), what="afrekeningen insert")
@@ -345,9 +360,8 @@ def insert_afrekening(row: dict):
 # ──────────────────────────────
 # UI helpers
 # ──────────────────────────────
-
 def appbar(suffix: str):
-    col1, col2, col3 = st.columns([5,3,2])
+    col1, col2, col3 = st.columns([5, 3, 2])
     with col1:
         st.markdown("<div class='appbar-left'>ANWW Duikapp</div>", unsafe_allow_html=True)
     with col2:
@@ -365,21 +379,23 @@ def appbar(suffix: str):
 # ──────────────────────────────
 # Pagina's
 # ──────────────────────────────
-
 def login_page():
     st.title("ANWW Duikapp")
     with st.form("login_form", clear_on_submit=False):
         u = st.text_input("Gebruikersnaam", key="login_user")
         p = st.text_input("Wachtwoord", type="password", key="login_pw")
         submitted = st.form_submit_button("Login")
-    if not submitted: return
+    if not submitted:
+        return
 
     if not u or not p:
-        st.error("Vul zowel gebruikersnaam als wachtwoord in."); return
+        st.error("Vul zowel gebruikersnaam als wachtwoord in.")
+        return
 
     user = get_user(u)
     if not user:
-        st.error("Onbekende gebruiker"); return
+        st.error("Onbekende gebruiker")
+        return
 
     ph = (user.get("password_hash") or "").encode("utf-8")
     ok = bcrypt.checkpw(p.encode("utf-8"), ph) if ph else False
@@ -391,11 +407,11 @@ def login_page():
     else:
         st.error("Onjuist wachtwoord.")
 
-
 def page_duiken():
     role = current_role()
     if is_viewer_effective():
-        st.error("Alleen-lezen gebruiker: geen toegang tot 'Duiken invoeren'."); return
+        st.error("Alleen-lezen gebruiker: geen toegang tot 'Duiken invoeren'.")
+        return
     appbar("duiken")
 
     plaatsen_list = list_plaatsen()
@@ -411,17 +427,36 @@ def page_duiken():
 
     if role == "admin":
         with st.expander("➕ Duiker toevoegen (Voornaam/Achternaam)"):
-            c1, c2, c3 = st.columns([1,1,1])
-            with c1: vn = st.text_input("Voornaam", key="new_vn")
-            with c2: an = st.text_input("Achternaam", key="new_an")
-            with c3: rest0 = st.number_input("Start rest (€)", min_value=0.0, step=0.5, value=0.0, key="new_rest")
+            c1, c2, c3 = st.columns([1, 1, 1])
+            with c1:
+                vn = st.text_input("Voornaam", key="new_vn")
+            with c2:
+                an = st.text_input("Achternaam", key="new_an")
+            with c3:
+                rest0 = st.number_input("Start rest (€)", min_value=0.0, step=0.5, value=0.0, key="new_rest")
             if st.button("Toevoegen", key="btn_add_duiker_split"):
                 if vn or an:
                     try:
-                        add_duiker_split(vn, an, rest0); st.success(f"Toegevoegd: {_fullname(vn, an)}"); st.rerun()
-                    except Exception as e: st.error(f"Toevoegen mislukt: {e}")
+                        add_duiker_split(vn, an, rest0)
+                        st.success(f"Toegevoegd: {_fullname(vn, an)}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Toevoegen mislukt: {e}")
                 else:
                     st.warning("Geef minstens voornaam of achternaam.")
+
+        with st.expander("➕ Duikplaats toevoegen"):
+            np = st.text_input("Nieuwe duikplaats", key="new_plaats_invoer")
+            if st.button("Duikplaats toevoegen", key="btn_add_plaats_invoer"):
+                if np and (np not in plaatsen_list):
+                    try:
+                        add_plaats(np)
+                        st.success(f"Duikplaats '{np}' toegevoegd.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Toevoegen mislukt: {e}")
+                else:
+                    st.warning("Leeg of al bestaand.")
 
     st.markdown("##### Geselecteerde duikers (nog niet opgeslagen)")
     if sel:
@@ -431,45 +466,47 @@ def page_duiken():
 
     can_save = (plaats != "— kies —") and (len(sel) > 0)
     if st.button("Opslaan duik(en)", type="primary", disabled=(is_viewer_effective() or not can_save), key="duiken_opslaan"):
-        # Sla nog steeds de displaynaam op in 'duiken.duiker' (compatibel met je huidige structuur)
         rows = [{"datum": datum.isoformat(), "plaats": plaats, "duiker": lab.replace(", ", " "), "duikcode": duikcode or ""} for lab in sel]
         save_duiken(rows)
         st.success(f"{len(sel)} duik(en) opgeslagen voor {plaats} · {duikcode or '—'} op {datum.strftime('%d/%m/%Y')}.")
-
 
 def page_overzicht():
     appbar("overzicht")
     df = fetch_duiken()
     if df.empty:
-        st.info("Nog geen duiken geregistreerd."); return
+        st.info("Nog geen duiken geregistreerd.")
+        return
 
     df["Datum"] = pd.to_datetime(df["datum"]).dt.date
     df["Plaats"] = df["plaats"]
     df["Duiker"] = df["duiker"]
     df["Duikcode"] = df["duikcode"].fillna("")
 
-    c1,c2,c3,c4 = st.columns([1,1,1,2])
+    c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
     with c1:
-        min_d,max_d = df["Datum"].min(), df["Datum"].max()
+        min_d, max_d = df["Datum"].min(), df["Datum"].max()
         rng = st.date_input("Datumrange", (min_d, max_d), format="DD/MM/YYYY")
     with c2:
         plaatsen = ["Alle"] + sorted(df["Plaats"].dropna().unique().tolist())
         pf = st.selectbox("Duikplaats", plaatsen, index=0)
     with c3:
-        codes = ["Alle"] + sorted([c if c else "—" for c in df["Duikcode"].fillna('').unique().tolist()])
+        codes = ["Alle"] + sorted([c if c else "—" for c in df["Duikcode"].fillna("").unique().tolist()])
         cf = st.selectbox("Duikcode", codes, index=0)
     with c4:
         duikers = ["Alle"] + sorted(df["Duiker"].dropna().unique().tolist())
         dfilt = st.selectbox("Duiker", duikers, index=0)
 
-    start,end = rng if isinstance(rng, tuple) else (df["Datum"].min(), df["Datum"].max())
-    f = df[(df["Datum"]>=start)&(df["Datum"]<=end)].copy()
-    if pf!="Alle": f = f[f["Plaats"]==pf]
-    if cf!="Alle": f = f[f["Duikcode"].replace({'':'—'})==cf]
-    if dfilt!="Alle": f = f[f["Duiker"]==dfilt]
+    start, end = rng if isinstance(rng, tuple) else (df["Datum"].min(), df["Datum"].max())
+    f = df[(df["Datum"] >= start) & (df["Datum"] <= end)].copy()
+    if pf != "Alle":
+        f = f[f["Plaats"] == pf]
+    if cf != "Alle":
+        f = f[f["Duikcode"].replace({"": "—"}) == cf]
+    if dfilt != "Alle":
+        f = f[f["Duiker"] == dfilt]
 
-    f = f.sort_values(["Datum","Plaats","Duikcode","Duiker"])
-    view = f[["Datum","Plaats","Duiker","Duikcode"]].copy()
+    f = f.sort_values(["Datum", "Plaats", "Duikcode", "Duiker"])
+    view = f[["Datum", "Plaats", "Duiker", "Duikcode"]].copy()
     view["Datum"] = pd.to_datetime(view["Datum"]).dt.strftime("%d/%m/%Y")
 
     st.dataframe(view, use_container_width=True, hide_index=True)
@@ -480,21 +517,21 @@ def page_overzicht():
     st.download_button("Download Excel (huidige filter)", data=out.getvalue(), file_name="duiken_export.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-
 def page_afrekening():
     appbar("afrekening")
     df = fetch_duiken()
     if df.empty:
-        st.info("Nog geen duiken geregistreerd."); return
+        st.info("Nog geen duiken geregistreerd.")
+        return
 
     df["Datum"] = pd.to_datetime(df["datum"]).dt.date
     df["Plaats"] = df["plaats"]
     df["Duiker"] = df["duiker"]
 
-    c1,c2,c3,c4 = st.columns(4)
+    c1, c2, c3, c4 = st.columns(4)
     with c1:
-        min_d,max_d = df["Datum"].min(), df["Datum"].max()
-        rng = st.date_input("Periode", (min_d,max_d), key="afr_range", format="DD/MM/YYYY")
+        min_d, max_d = df["Datum"].min(), df["Datum"].max()
+        rng = st.date_input("Periode", (min_d, max_d), key="afr_range", format="DD/MM/YYYY")
     with c2:
         bedrag = st.number_input("Bedrag per duik (€)", min_value=0.0, step=0.5, value=5.0, key="afr_bedrag")
     with c3:
@@ -502,49 +539,51 @@ def page_afrekening():
     with c4:
         blokgrootte = st.number_input("Blokgrootte (€)", min_value=0.0, step=10.0, value=30.0, key="afr_blok")
 
-    start,end = rng if isinstance(rng, tuple) else (df["Datum"].min(), df["Datum"].max())
-    m = (df["Datum"]>=start)&(df["Datum"]<=end)
-    if pf!="Alle": m &= df["Plaats"]==pf
+    start, end = rng if isinstance(rng, tuple) else (df["Datum"].min(), df["Datum"].max())
+    m = (df["Datum"] >= start) & (df["Datum"] <= end)
+    if pf != "Alle":
+        m &= df["Plaats"] == pf
     s = df.loc[m].copy()
     if s.empty:
-        st.warning("Geen duiken in de gekozen periode/filters."); return
+        st.warning("Geen duiken in de gekozen periode/filters.")
+        return
 
-    # Per duiker tellen
     per = s.groupby("Duiker").size().reset_index(name="AantalDuiken")
-    per["Bruto"] = (per["AantalDuiken"]*bedrag).round(2)
+    per["Bruto"] = (per["AantalDuiken"] * bedrag).round(2)
 
-    # Koppel naar (Voornaam, Achternaam) en Rest (via duikers)
-    # We zoeken eerst exacte match op 'naam'; anders proberen we te raden
-    ddf = run_db(lambda: sb.table("duikers").select("voornaam, achternaam, naam, rest_saldo").execute(), what="duikers join").data or []
+    ddf = run_db(lambda: sb.table("duikers").select("voornaam, achternaam, naam, rest_saldo").execute(),
+                 what="duikers join").data or []
     ddf = pd.DataFrame(ddf)
 
     vns, ans, rests = [], [], []
     for disp in per["Duiker"].astype(str).tolist():
         vn, an, rest = "", "", 0.0
         if not ddf.empty:
-            row = ddf.loc[ddf["naam"]==disp]
+            row = ddf.loc[ddf["naam"] == disp]
             if not row.empty:
                 vn = (row.iloc[0].get("voornaam") or "").strip()
                 an = (row.iloc[0].get("achternaam") or "").strip()
                 rest = float(row.iloc[0].get("rest_saldo") or 0)
             else:
                 vn, an = _split_guess(disp)
-                # probeer lookup op gesplitste velden
-                row2 = ddf.loc[(ddf["voornaam"].fillna("").str.strip()==vn) & (ddf["achternaam"].fillna("").str.strip()==an)]
-                if not row2.empty: rest = float(row2.iloc[0].get("rest_saldo") or 0)
+                row2 = ddf.loc[(ddf["voornaam"].fillna("").str.strip() == vn) &
+                               (ddf["achternaam"].fillna("").str.strip() == an)]
+                if not row2.empty:
+                    rest = float(row2.iloc[0].get("rest_saldo") or 0)
         else:
             vn, an = _split_guess(disp)
-        vns.append(vn); ans.append(an); rests.append(round(float(rest),2))
+        vns.append(vn)
+        ans.append(an)
+        rests.append(round(float(rest), 2))
 
     per["Voornaam"] = vns
     per["Achternaam"] = ans
     per["RestOud"] = rests
     per["Totaal"] = (per["Bruto"] + per["RestOud"]).round(2)
 
-    # Blokken
-    def calc_blokken(total: float) -> tuple[int,float,float]:
+    def calc_blokken(total: float) -> tuple[int, float, float]:
         if blokgrootte <= 0:
-            return 0, 0.0, round(total,2)
+            return 0, 0.0, round(total, 2)
         n = math.floor(total / blokgrootte)
         uit = round(n * blokgrootte, 2)
         rest = round(total - uit, 2)
@@ -556,18 +595,17 @@ def page_afrekening():
         rows.append({**r.to_dict(), "Blokken": n, "UitTeBetalen": uit, "RestNieuw": rest})
     per = pd.DataFrame(rows)
 
-    # Sorteer op achternaam, voornaam
-    per = per.sort_values(["Achternaam","Voornaam","Duiker"], na_position="last").reset_index(drop=True)
+    per = per.sort_values(["Achternaam", "Voornaam", "Duiker"], na_position="last").reset_index(drop=True)
 
     st.subheader("Afrekening per duiker")
-    show_cols = ["Achternaam","Voornaam","AantalDuiken","Bruto","RestOud","Totaal","Blokken","UitTeBetalen","RestNieuw"]
+    show_cols = ["Achternaam", "Voornaam", "AantalDuiken", "Bruto", "RestOud", "Totaal", "Blokken", "UitTeBetalen", "RestNieuw"]
     st.dataframe(per[show_cols], use_container_width=True, hide_index=True)
 
-    cX,cY,cZ = st.columns(3)
+    cX, cY, cZ = st.columns(3)
     with cX:
-        st.metric("Totaal uit te betalen", f"€ {float(per['UitTeBetalen'].sum()):,.2f}".replace(",","X").replace(".",",").replace("X","."))
+        st.metric("Totaal uit te betalen", f"€ {float(per['UitTeBetalen'].sum()):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
     with cY:
-        st.metric("Nieuw totaal restbedrag", f"€ {float(per['RestNieuw'].sum()):,.2f}".replace(",","X").replace(".",",").replace("X","."))
+        st.metric("Nieuw totaal restbedrag", f"€ {float(per['RestNieuw'].sum()):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
     with cZ:
         st.caption(f"Periode: {start.strftime('%d/%m/%Y')} – {end.strftime('%d/%m/%Y')} · Blok: €{blokgrootte:.2f}")
 
@@ -582,7 +620,7 @@ def page_afrekening():
 
     if st.button("Markeer geselecteerde als betaald"):
         try:
-            sel = per[per["select"]==True]
+            sel = per[per["select"] == True]
             if sel.empty:
                 st.warning("Geen duikers geselecteerd.")
             else:
@@ -603,9 +641,8 @@ def page_afrekening():
                         "betaald_op": dt.utcnow().isoformat()
                     }
                     insert_afrekening(row)
-                    # Update het restsaldo in duikers
                     if row["voornaam"] or row["achternaam"]:
-                        set_rest_saldo(row["voornaam"], row["achternaam"], row["rest_nieuw"]) 
+                        set_rest_saldo(row["voornaam"], row["achternaam"], row["rest_nieuw"])
                 st.success(f"Afrekening geregistreerd voor {len(sel)} duiker(s).")
                 st.rerun()
         except Exception as e:
@@ -616,10 +653,9 @@ def page_afrekening():
     out = io.BytesIO()
     with pd.ExcelWriter(out, engine="openpyxl") as w:
         per[show_cols].to_excel(w, index=False, sheet_name="Afrekening")
-        s.sort_values(["Datum","Plaats","duikcode","Duiker"]).to_excel(w, index=False, sheet_name="Detail")
+        s.sort_values(["Datum", "Plaats", "duikcode", "Duiker"]).to_excel(w, index=False, sheet_name="Detail")
     st.download_button("⬇️ Download Afrekening (Excel)", data=out.getvalue(), file_name="Afrekening.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
 
 def page_beheer():
     if is_viewer_effective() or current_role() != "admin":
@@ -751,7 +787,6 @@ def page_beheer():
         ddf = pd.DataFrame(res.data or [])
 
         if not ddf.empty:
-            # ✅ Robuuste sortering
             if {"achternaam", "voornaam"}.issubset(ddf.columns):
                 ddf["_an"] = ddf["achternaam"].fillna("").str.lower()
                 ddf["_vn"] = ddf["voornaam"].fillna("").str.lower()
@@ -814,8 +849,6 @@ def page_beheer():
             else:
                 st.warning("Geef minstens een voornaam of achternaam in.")
 
- 
-
     # ───────────── TAB 2: Duikplaatsen ─────────────
     with tabs[2]:
         plaatsen = list_plaatsen()
@@ -857,13 +890,13 @@ def page_beheer():
                            what="users select (backup)")
             duikers = run_db(lambda: sb.table("duikers").select("*").execute(),
                              what="duikers select (backup)")
-            plaatsen = run_db(lambda: sb.table("duikplaatsen").select("*").execute(),
-                              what="duikplaatsen select (backup)")
+            plaatsen_df = run_db(lambda: sb.table("duikplaatsen").select("*").execute(),
+                                 what="duikplaatsen select (backup)")
             duiken = run_db(lambda: sb.table("duiken").select("*").execute(),
                             what="duiken select (backup)")
             df_users = pd.DataFrame(users.data or [])
             df_duikers = pd.DataFrame(duikers.data or [])
-            df_plaatsen = pd.DataFrame(plaatsen.data or [])
+            df_plaatsen = pd.DataFrame(plaatsen_df.data or [])
             df_duiken = pd.DataFrame(duiken.data or [])
             stamp = dt.utcnow().strftime("%Y%m%d_%H%M%S")
             with pd.ExcelWriter(out, engine="openpyxl") as w:
@@ -878,19 +911,17 @@ def page_beheer():
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
-
 # ──────────────────────────────
 # Main
 # ──────────────────────────────
-
 def main():
     if "logged_in" not in st.session_state:
         st.session_state.logged_in = False
 
     if not st.session_state.logged_in:
-        login_page(); return
+        login_page()
+        return
 
-    # Rol up-to-date houden
     try:
         urow = get_user(st.session_state.get("username", ""))
         if urow:
@@ -902,25 +933,34 @@ def main():
     st.markdown(
         f"<div class='badge'>Ingelogd als: <b>{st.session_state.get('username','?')}</b> · Rol: <b>{role}</b>"
         + (" · READ-ONLY (noodslot)" if FORCE_READONLY else "")
-        + "</div>",
+        + f" · Build: {APP_BUILD}</div>",
         unsafe_allow_html=True
     )
 
     if role == "admin" and not FORCE_READONLY:
         tabs = st.tabs(["Duiken invoeren", "Overzicht", "Afrekening", "Beheer"])
-        with tabs[0]: page_duiken()
-        with tabs[1]: page_overzicht()
-        with tabs[2]: page_afrekening()
-        with tabs[3]: page_beheer()
+        with tabs[0]:
+            page_duiken()
+        with tabs[1]:
+            page_overzicht()
+        with tabs[2]:
+            page_afrekening()
+        with tabs[3]:
+            page_beheer()
     elif role == "user" and not FORCE_READONLY:
         tabs = st.tabs(["Duiken invoeren", "Overzicht", "Afrekening"])
-        with tabs[0]: page_duiken()
-        with tabs[1]: page_overzicht()
-        with tabs[2]: page_afrekening()
+        with tabs[0]:
+            page_duiken()
+        with tabs[1]:
+            page_overzicht()
+        with tabs[2]:
+            page_afrekening()
     else:
-        tabs = st.tabs(["Overzicht", "Afrekening"]) 
-        with tabs[0]: page_overzicht()
-        with tabs[1]: page_afrekening()
+        tabs = st.tabs(["Overzicht", "Afrekening"])
+        with tabs[0]:
+            page_overzicht()
+        with tabs[1]:
+            page_afrekening()
 
 if __name__ == "__main__":
     main()
