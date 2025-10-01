@@ -696,9 +696,13 @@ def page_beheer():
 
     # Duikers beheer: invoer met Voornaam/Achternaam + instelbaar restsaldo
     with tabs[1]:
-        res = run_db(lambda: sb.table("duikers").select("voornaam, achternaam, naam, rest_saldo").execute(), what="duikers select (beheer)")
-        ddf = pd.DataFrame(res.data or [])
-       if not ddf.empty:
+        res = run_db(
+    lambda: sb.table("duikers").select("voornaam, achternaam, naam, rest_saldo").execute(),
+    what="duikers select (beheer)"
+)
+ddf = pd.DataFrame(res.data or [])
+
+if not ddf.empty:
     # ✅ Robuuste sortering met fallback voor legacy schema
     if {"achternaam", "voornaam"}.issubset(ddf.columns):
         ddf["_an"] = ddf["achternaam"].fillna("").str.lower()
