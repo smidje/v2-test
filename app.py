@@ -802,7 +802,7 @@ def page_beheer():
                         lambda: sb.table("duikers").insert({
                             "voornaam": vn,
                             "achternaam": an,
-                            "naam": f\"{vn} {an}\".strip(),
+                            "naam": f"{vn} {an}".strip(),
                             "rest_saldo": rs
                         }).execute(),
                         what="duikers insert (beheer)"
