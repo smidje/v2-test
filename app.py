@@ -815,7 +815,7 @@ def page_beheer():
                 st.warning("Geef minstens een voornaam of achternaam in.")
 
     # ───────────── TAB 2: Duikplaatsen ─────────────
-    with tabs[2]:
+   with tabs[2]:
     plaatsen = list_plaatsen()
     st.subheader("Duikplaatsen (overzicht)")
     st.dataframe(pd.DataFrame({"Plaats": plaatsen}), use_container_width=True, hide_index=True)
