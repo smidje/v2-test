@@ -1,6 +1,6 @@
-# app.py — ANWW Duikapp (duikers + duikplaatsen toevoegen, fixed indentation & delete_users)
+# app.py — ANWW Duikapp (duikers + duikplaatsen toevoegen, delete in Overzicht)
 # Build tag
-APP_BUILD = "v2025-10-01-ANWW-05"
+APP_BUILD = "v2025-10-01-ANWW-06"
 
 import streamlit as st
 from datetime import datetime as dt
@@ -206,7 +206,6 @@ def clear_lock(username: str):
            .eq("username", username).execute(), what="users update (unlock)")
 
 def delete_users(usernames: list[str]) -> tuple[bool, int, str | None]:
-    """Gebruikers bulk verwijderen."""
     if not usernames:
         return True, 0, None
     try:
@@ -219,7 +218,6 @@ def delete_users(usernames: list[str]) -> tuple[bool, int, str | None]:
 
 # ——— DU I K E R S ———
 def list_duikers_weergave() -> list[str]:
-    """Geef labels 'Achternaam, Voornaam' indien beschikbaar, anders legacy 'naam'. Gesorteerd op achternaam."""
     try:
         res = run_db(lambda: sb.table("duikers").select("voornaam, achternaam, naam, rest_saldo").execute(),
                      what="duikers select (split)")
@@ -477,6 +475,11 @@ def page_overzicht():
         st.info("Nog geen duiken geregistreerd.")
         return
 
+    # Zorg dat 'id' aanwezig is voor delete-acties
+    if "id" not in df.columns:
+        st.warning("Let op: kolom 'id' ontbreekt in 'duiken' tabel — verwijderen werkt dan niet.")
+        df["id"] = None  # failsafe; UI blijft werken zonder delete
+
     df["Datum"] = pd.to_datetime(df["datum"]).dt.date
     df["Plaats"] = df["plaats"]
     df["Duiker"] = df["duiker"]
@@ -505,16 +508,65 @@ def page_overzicht():
     if dfilt != "Alle":
         f = f[f["Duiker"] == dfilt]
 
-    f = f.sort_values(["Datum", "Plaats", "Duikcode", "Duiker"])
+    f = f.sort_values(["Datum", "Plaats", "Duikcode", "Duiker", "id"]).reset_index(drop=True)
+
+    # Weergave-tabel (zonder id)
     view = f[["Datum", "Plaats", "Duiker", "Duikcode"]].copy()
     view["Datum"] = pd.to_datetime(view["Datum"]).dt.strftime("%d/%m/%Y")
-
     st.dataframe(view, use_container_width=True, hide_index=True)
 
+    # --- Nieuw: Duiken verwijderen (op basis van huidige filter) ---
+    st.divider()
+    st.subheader("Duiken verwijderen (volgens huidige filter)")
+    st.caption("Selecteer één of meerdere duiken en klik op 'Verwijder geselecteerde'. Dit kan niet ongedaan worden gemaakt.")
+
+    # Maak schaalbare labels → id mapping
+    def _label(row):
+        dc = row.get("Duikcode") or row.get("duikcode") or ""
+        dc = dc if dc else "—"
+        return f"{row['Datum'].strftime('%d/%m/%Y')} · {row['Plaats']} · {row['Duiker']} · {dc}"
+
+    f_for_labels = f.copy()
+    # zorg dat Datum voor labels datetime.date is
+    f_for_labels["Datum"] = pd.to_datetime(f_for_labels["Datum"]).dt.date
+
+    options = []
+    id_map = {}
+    for _, r in f_for_labels.iterrows():
+        label = _label(r)
+        # Als meerdere records dezelfde weergave hebben, maak label uniek met (#id)
+        if (label in id_map) or (label in options):
+            label_unique = f"{label}  (#ID:{r['id']})"
+        else:
+            label_unique = label
+        options.append(label_unique)
+        id_map[label_unique] = r["id"]
+
+    sel_to_delete = st.multiselect("Kies duiken om te verwijderen", options, key="ovz_del_sel")
+
+    btn_col1, btn_col2 = st.columns([1, 4])
+    with btn_col1:
+        if st.button("Verwijder geselecteerde", disabled=(len(sel_to_delete) == 0 or is_viewer_effective())):
+            ids = [id_map[lbl] for lbl in sel_to_delete if id_map[lbl] is not None]
+            if not ids:
+                st.warning("Geen geldige ID's geselecteerd (controleer of de 'duiken' tabel een 'id' kolom heeft).")
+            else:
+                try:
+                    delete_duiken_by_ids(ids)
+                    st.success(f"Verwijderd: {len(ids)} duik(en).")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Verwijderen mislukt: {e}")
+    with btn_col2:
+        st.caption("Tip: filter eerst (datum/plaats/duiker/duikcode) om preciezer te selecteren.")
+
+    # Export van de huidige filter
+    st.divider()
+    st.subheader("Export (Excel) — huidige filter")
     out = io.BytesIO()
     with pd.ExcelWriter(out, engine="openpyxl") as w:
         view.to_excel(w, index=False, sheet_name="Duiken")
-    st.download_button("Download Excel (huidige filter)", data=out.getvalue(), file_name="duiken_export.xlsx",
+    st.download_button("⬇️ Download Excel", data=out.getvalue(), file_name="duiken_export.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 def page_afrekening():
