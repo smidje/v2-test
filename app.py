@@ -623,22 +623,27 @@ def page_afrekening():
 
 def page_beheer():
     if is_viewer_effective() or current_role() != "admin":
-        st.error("Toegang geweigerd — alleen admins."); return
+        st.error("Toegang geweigerd — alleen admins.")
+        return
 
     appbar("beheer")
-    tabs = st.tabs(["Gebruikers","Duikers (beheer)","Duikplaatsen","Back-up & export"])
+    tabs = st.tabs(["Gebruikers", "Duikers", "Duikplaatsen", "Back-up & export"])
 
-    # Gebruikers (ongewijzigd t.o.v. jouw basis)
+    # ───────────── TAB 0: Gebruikers ─────────────
     with tabs[0]:
-        res = run_db(lambda: sb.table("users").select("username, role, failed_attempts, locked_until").order("username").execute(),
-                     what="users select (beheer)")
+        res = run_db(
+            lambda: sb.table("users")
+                      .select("username, role, failed_attempts, locked_until")
+                      .order("username").execute(),
+            what="users select (beheer)"
+        )
         users_df = pd.DataFrame(res.data or [])
         st.dataframe(users_df, use_container_width=True, hide_index=True)
 
-        st.subheader("Rol wijzigen / Gebruiker toevoegen / Reset wachtwoord")
+        st.subheader("Rol van gebruiker wijzigen")
         all_usernames = users_df["username"].astype(str).tolist() if not users_df.empty else []
         sel_role_user = st.selectbox("Kies gebruiker", all_usernames, key="chg_role_user")
-        new_role = st.selectbox("Nieuwe rol", ["viewer","user","admin"], index=1, key="chg_role_new")
+        new_role = st.selectbox("Nieuwe rol", ["viewer", "user", "admin"], index=1, key="chg_role_new")
         if st.button("Wijzig rol"):
             if not sel_role_user:
                 st.warning("Kies eerst een gebruiker.")
@@ -647,37 +652,74 @@ def page_beheer():
                     current = get_user(sel_role_user)
                     cur_role = normalize_role(current.get("role") if current else "")
                     if cur_role == "admin" and new_role != "admin":
-                        admins = set(list_admin_usernames()); admins.discard(sel_role_user)
+                        admins = set(list_admin_usernames())
+                        admins.discard(sel_role_user)
                         if len(admins) == 0:
                             st.error("Er moet minstens één andere admin overblijven.")
                         else:
-                            update_user_role(sel_role_user, new_role); st.success("Rol gewijzigd."); st.rerun()
+                            update_user_role(sel_role_user, new_role)
+                            st.success(f"Rol gewijzigd naar {new_role}.")
+                            st.rerun()
                     else:
-                        update_user_role(sel_role_user, new_role); st.success("Rol gewijzigd."); st.rerun()
+                        update_user_role(sel_role_user, new_role)
+                        st.success(f"Rol gewijzigd naar {new_role}.")
+                        st.rerun()
                 except Exception as e:
                     st.error(f"Rol wijzigen mislukt: {e}")
 
         st.divider()
-        c1,c2,c3 = st.columns(3)
-        with c1: u = st.text_input("Username")
-        with c2: p = st.text_input("Wachtwoord")
-        with c3: r = st.selectbox("Rol", ["viewer","user","admin"], index=0)
+        st.subheader("Gebruikers verwijderen")
+        protect = {"admin", st.session_state.get("username", "")}
+        sel_del_users = st.multiselect(
+            "Kies gebruikers om te verwijderen",
+            [u for u in all_usernames if u not in protect]
+        )
+        if st.button("Verwijder geselecteerde gebruikers", disabled=(len(sel_del_users) == 0)):
+            remaining_admins = set(list_admin_usernames()) - set(sel_del_users)
+            if len(remaining_admins) == 0:
+                st.error("Minstens één admin moet overblijven.")
+            else:
+                ok, n, err = delete_users(sel_del_users)
+                if ok:
+                    st.success(f"Verwijderd: {n} gebruiker(s).")
+                    st.rerun()
+                else:
+                    st.error(f"Verwijderen mislukt: {err}")
+
+        st.divider()
+        st.subheader("Nieuwe gebruiker")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            u = st.text_input("Username")
+        with c2:
+            p = st.text_input("Wachtwoord")
+        with c3:
+            r = st.selectbox("Rol", ["viewer", "user", "admin"], index=0)
         if st.button("Gebruiker toevoegen"):
             if u and p and (get_user(u) is None):
                 hashed = bcrypt.hashpw(p.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
                 try:
-                    run_db(lambda: sb.table("users").insert({
-                        "username":u,"password_hash":hashed,"role":normalize_role(r),
-                        "failed_attempts":0,"locked_until":None
-                    }).execute(), what="users insert (beheer)")
-                    st.success(f"Gebruiker '{u}' toegevoegd ({r})."); st.rerun()
+                    run_db(
+                        lambda: sb.table("users").insert({
+                            "username": u,
+                            "password_hash": hashed,
+                            "role": normalize_role(r),
+                            "failed_attempts": 0,
+                            "locked_until": None
+                        }).execute(),
+                        what="users insert (beheer)"
+                    )
+                    st.success(f"Gebruiker '{u}' toegevoegd ({r}).")
+                    st.rerun()
                 except Exception as e:
                     st.error(f"Toevoegen mislukt: {e}")
             else:
                 st.warning("Ongeldig of reeds bestaand.")
 
         st.divider()
-        res = run_db(lambda: sb.table("users").select("username").order("username").execute(), what="users select (pw)")
+        st.subheader("Wachtwoord resetten / Deblokkeren")
+        res = run_db(lambda: sb.table("users").select("username").order("username").execute(),
+                     what="users select (pw)")
         all_users_pw = [row["username"] for row in (res.data or [])]
         sel_user = st.selectbox("Kies gebruiker", all_users_pw)
         new_pw = st.text_input("Nieuw wachtwoord")
@@ -685,113 +727,135 @@ def page_beheer():
         with colr1:
             if st.button("Reset wachtwoord"):
                 if sel_user and new_pw:
-                    try: set_password(sel_user, new_pw); st.success(f"Wachtwoord van '{sel_user}' is gewijzigd.")
-                    except Exception as e: st.error(f"Reset mislukt: {e}")
+                    try:
+                        set_password(sel_user, new_pw)
+                        st.success(f"Wachtwoord van '{sel_user}' is gewijzigd.")
+                    except Exception as e:
+                        st.error(f"Reset mislukt: {e}")
                 else:
                     st.warning("Selecteer gebruiker en geef nieuw wachtwoord in.")
         with colr2:
             if st.button("Deblokkeer account"):
-                try: clear_lock(sel_user); st.success(f"Account van '{sel_user}' is gedeblokkeerd.")
-                except Exception as e: st.error(f"Deblokkeren mislukt: {e}")
+                try:
+                    clear_lock(sel_user)
+                    st.success(f"Account van '{sel_user}' is gedeblokkeerd.")
+                except Exception as e:
+                    st.error(f"Deblokkeren mislukt: {e}")
 
-    # Duikers beheer: invoer met Voornaam/Achternaam + instelbaar restsaldo
+    # ───────────── TAB 1: Duikers ─────────────
     with tabs[1]:
         res = run_db(
-    lambda: sb.table("duikers").select("voornaam, achternaam, naam, rest_saldo").execute(),
-    what="duikers select (beheer)"
-)
-ddf = pd.DataFrame(res.data or [])
+            lambda: sb.table("duikers").select("voornaam, achternaam, naam, rest_saldo").execute(),
+            what="duikers select (beheer)"
+        )
+        ddf = pd.DataFrame(res.data or [])
 
-if not ddf.empty:
-    # ✅ Robuuste sortering met fallback voor legacy schema
-    if {"achternaam", "voornaam"}.issubset(ddf.columns):
-        ddf["_an"] = ddf["achternaam"].fillna("").str.lower()
-        ddf["_vn"] = ddf["voornaam"].fillna("").str.lower()
-        ddf = ddf.sort_values(["_an", "_vn"]).drop(columns=["_an", "_vn"])
-    elif "naam" in ddf.columns:
-        tmp = ddf["naam"].fillna("").map(_split_guess)
-        ddf["_vn"] = tmp.map(lambda t: t[0])
-        ddf["_an"] = tmp.map(lambda t: t[1])
-        ddf = ddf.sort_values(["_an", "_vn"]).drop(columns=["_an", "_vn"])
+        if not ddf.empty:
+            # ✅ Robuuste sortering
+            if {"achternaam", "voornaam"}.issubset(ddf.columns):
+                ddf["_an"] = ddf["achternaam"].fillna("").str.lower()
+                ddf["_vn"] = ddf["voornaam"].fillna("").str.lower()
+                ddf = ddf.sort_values(["_an", "_vn"]).drop(columns=["_an", "_vn"])
+            elif "naam" in ddf.columns:
+                tmp = ddf["naam"].fillna("").map(_split_guess)
+                ddf["_vn"] = tmp.map(lambda t: t[0])
+                ddf["_an"] = tmp.map(lambda t: t[1])
+                ddf = ddf.sort_values(["_an", "_vn"]).drop(columns=["_an", "_vn"])
 
-    view = ddf.rename(columns={
-        "voornaam": "Voornaam",
-        "achternaam": "Achternaam",
-        "rest_saldo": "Rest (start)"
-    })
-else:
-    view = pd.DataFrame(columns=["Voornaam", "Achternaam", "Rest (start)"])
-
+            view = ddf.rename(columns={
+                "voornaam": "Voornaam",
+                "achternaam": "Achternaam",
+                "rest_saldo": "Rest (start)"
+            })
+        else:
+            view = pd.DataFrame(columns=["Voornaam", "Achternaam", "Rest (start)"])
 
         st.subheader("Duikers (overzicht)")
-        st.dataframe(view[["Voornaam","Achternaam","Rest (start)"]], use_container_width=True, hide_index=True)
+        st.dataframe(view, use_container_width=True, hide_index=True)
 
-        st.divider()
-        st.subheader("Duiker toevoegen")
-        c1,c2,c3 = st.columns([1,1,1])
-        with c1: vn = st.text_input("Voornaam", key="beheer_vn")
-        with c2: an = st.text_input("Achternaam", key="beheer_an")
-        with c3: rest0 = st.number_input("Start rest (€)", min_value=0.0, step=0.5, value=0.0, key="beheer_rest")
-        if st.button("Toevoegen (split)"):
-            if vn or an:
-                try: add_duiker_split(vn, an, rest0); st.success("Toegevoegd."); st.rerun()
-                except Exception as e: st.error(f"Toevoegen mislukt: {e}")
-            else:
-                st.warning("Geef minstens voornaam of achternaam.")
-
-        st.divider()
-        st.subheader("Restsaldo bijwerken")
-        if not ddf.empty:
-            # inline update controls
-            names = [f"{(r['achternaam'] or '').strip()}, {(r['voornaam'] or '').strip()}".strip(', ') for _, r in ddf.iterrows()]
-            pick = st.selectbox("Duiker", names)
-            new_rest = st.number_input("Nieuw restsaldo (€)", min_value=0.0, step=0.5, value=0.0)
-            if st.button("Opslaan restsaldo"):
-                if "," in pick:
-                    an, vn = [p.strip() for p in pick.split(",",1)]
-                else:
-                    vn, an = _split_guess(pick)
-                try: update_duiker_rest(vn, an, new_rest); st.success("Restsaldo bijgewerkt."); st.rerun()
-                except Exception as e: st.error(f"Bewerking mislukt: {e}")
-        else:
-            st.caption("Nog geen duikers.")
-
-        st.divider()
         st.subheader("Duikers verwijderen")
-        labels = list_duikers_weergave()
-        sel_duikers = st.multiselect("Kies duikers om te verwijderen", labels)
-        if st.button("Verwijder geselecteerde duikers", disabled=(len(sel_duikers)==0)):
+        sel_duikers = st.multiselect(
+            "Kies duikers om te verwijderen",
+            view["Achternaam"] + ", " + view["Voornaam"] if not view.empty else []
+        )
+        if st.button("Verwijder geselecteerde duikers", disabled=(len(sel_duikers) == 0)):
             ok, n, err = delete_duikers(sel_duikers)
-            if ok: st.success(f"Verwijderd: {n} duiker(s)."); st.rerun()
-            else:  st.error(f"Verwijderen mislukt: {err}")
+            if ok:
+                st.success(f"Verwijderd: {n} duiker(s).")
+                st.rerun()
+            else:
+                st.error(f"Verwijderen mislukt: {err}")
 
-    # Duikplaatsen & backup — ongewijzigd
+        st.divider()
+        st.subheader("Nieuwe duiker")
+        c1, c2, c3 = st.columns([1, 1, 1])
+        with c1:
+            vn = st.text_input("Voornaam")
+        with c2:
+            an = st.text_input("Achternaam")
+        with c3:
+            rs = st.number_input("Start rest (€)", value=0.0, step=1.0)
+        if st.button("Toevoegen aan duikers"):
+            if (vn or an):
+                try:
+                    run_db(
+                        lambda: sb.table("duikers").insert({
+                            "voornaam": vn,
+                            "achternaam": an,
+                            "naam": f\"{vn} {an}\".strip(),
+                            "rest_saldo": rs
+                        }).execute(),
+                        what="duikers insert (beheer)"
+                    )
+                    st.success(f"Duiker '{an}, {vn}' toegevoegd.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Toevoegen mislukt: {e}")
+            else:
+                st.warning("Geef minstens een voornaam of achternaam in.")
+
+    # ───────────── TAB 2: Duikplaatsen ─────────────
     with tabs[2]:
         plaatsen = list_plaatsen()
         st.dataframe(pd.DataFrame({"Plaats": plaatsen}), use_container_width=True, hide_index=True)
+
         st.subheader("Duikplaatsen verwijderen")
         sel_plaatsen = st.multiselect("Kies duikplaatsen om te verwijderen", plaatsen)
-        if st.button("Verwijder geselecteerde duikplaatsen", disabled=(len(sel_plaatsen)==0)):
+        if st.button("Verwijder geselecteerde duikplaatsen", disabled=(len(sel_plaatsen) == 0)):
             ok, n, err = delete_plaatsen(sel_plaatsen)
-            if ok: st.success(f"Verwijderd: {n} duikplaats(en)."); st.rerun()
-            else:  st.error(f"Verwijderen mislukt: {err}")
+            if ok:
+                st.success(f"Verwijderd: {n} duikplaats(en).")
+                st.rerun()
+            else:
+                st.error(f"Verwijderen mislukt: {err}")
+
         st.divider()
         np = st.text_input("Nieuwe duikplaats")
         if st.button("Toevoegen aan duikplaatsen"):
             if np and (np not in plaatsen):
-                try: add_plaats(np); st.success(f"Duikplaats '{np}' toegevoegd."); st.rerun()
-                except Exception as e: st.error(f"Toevoegen mislukt: {e}")
+                try:
+                    add_plaats(np)
+                    st.success(f"Duikplaats '{np}' toegevoegd.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Toevoegen mislukt: {e}")
             else:
                 st.warning("Leeg of al bestaand.")
 
+    # ───────────── TAB 3: Back-up & export ─────────────
     with tabs[3]:
-        st.info("Alle data wordt automatisch opgeslagen in Supabase. Hier kun je een back-up (Excel) downloaden van tabellen.")
+        st.info("Alle data wordt automatisch opgeslagen in Supabase. "
+                "Hier kun je een back-up (Excel) downloaden van alle tabellen.")
         if st.button("Maak back-up (Excel)"):
             out = io.BytesIO()
-            users = run_db(lambda: sb.table("users").select("*").execute(), what="users select (backup)")
-            duikers = run_db(lambda: sb.table("duikers").select("*").execute(), what="duikers select (backup)")
-            plaatsen = run_db(lambda: sb.table("duikplaatsen").select("*").execute(), what="duikplaatsen select (backup)")
-            duiken = run_db(lambda: sb.table("duiken").select("*").execute(), what="duiken select (backup)")
+            users = run_db(lambda: sb.table("users").select("*").execute(),
+                           what="users select (backup)")
+            duikers = run_db(lambda: sb.table("duikers").select("*").execute(),
+                             what="duikers select (backup)")
+            plaatsen = run_db(lambda: sb.table("duikplaatsen").select("*").execute(),
+                              what="duikplaatsen select (backup)")
+            duiken = run_db(lambda: sb.table("duiken").select("*").execute(),
+                            what="duiken select (backup)")
             df_users = pd.DataFrame(users.data or [])
             df_duikers = pd.DataFrame(duikers.data or [])
             df_plaatsen = pd.DataFrame(plaatsen.data or [])
@@ -802,8 +866,13 @@ else:
                 df_duikers.to_excel(w, index=False, sheet_name="duikers")
                 df_plaatsen.to_excel(w, index=False, sheet_name="duikplaatsen")
                 df_duiken.to_excel(w, index=False, sheet_name="duiken")
-            st.download_button("⬇️ Download back-up", data=out.getvalue(), file_name=f"anww_backup_{stamp}.xlsx",
-                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.download_button(
+                "⬇️ Download back-up",
+                data=out.getvalue(),
+                file_name=f"anww_backup_{stamp}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
 
 # ──────────────────────────────
 # Main
