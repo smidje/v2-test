@@ -699,7 +699,18 @@ def page_beheer():
         res = run_db(lambda: sb.table("duikers").select("voornaam, achternaam, naam, rest_saldo").execute(), what="duikers select (beheer)")
         ddf = pd.DataFrame(res.data or [])
         if not ddf.empty:
-            ddf = ddf.sort_values([ddf["achternaam"].fillna("").str.lower(), ddf["voornaam"].fillna("").str.lower()])
+           # ✅ Robuuste sortering met fallback voor legacy schema
+if {"achternaam", "voornaam"}.issubset(ddf.columns):
+    ddf["_an"] = ddf["achternaam"].fillna("").str.lower()
+    ddf["_vn"] = ddf["voornaam"].fillna("").str.lower()
+    ddf = ddf.sort_values(["_an", "_vn"]).drop(columns=["_an", "_vn"])
+elif "naam" in ddf.columns:
+    # Legacy: splits tijdelijk om te sorteren
+    tmp = ddf["naam"].fillna("").map(_split_guess)
+    ddf["_vn"] = tmp.map(lambda t: t[0])
+    ddf["_an"] = tmp.map(lambda t: t[1])
+    ddf = ddf.sort_values(["_an", "_vn"]).drop(columns=["_an", "_vn"])
+
             view = ddf.rename(columns={"voornaam":"Voornaam","achternaam":"Achternaam","rest_saldo":"Rest (start)"})
         else:
             view = pd.DataFrame(columns=["Voornaam","Achternaam","Rest (start)"])
