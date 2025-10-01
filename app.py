@@ -814,37 +814,38 @@ def page_beheer():
             else:
                 st.warning("Geef minstens een voornaam of achternaam in.")
 
+ 
+
     # ───────────── TAB 2: Duikplaatsen ─────────────
-   with tabs[2]:
-    plaatsen = list_plaatsen()
-    st.subheader("Duikplaatsen (overzicht)")
-    st.dataframe(pd.DataFrame({"Plaats": plaatsen}), use_container_width=True, hide_index=True)
+    with tabs[2]:
+        plaatsen = list_plaatsen()
+        st.subheader("Duikplaatsen (overzicht)")
+        st.dataframe(pd.DataFrame({"Plaats": plaatsen}), use_container_width=True, hide_index=True)
 
-    st.divider()
-    st.subheader("Duikplaatsen verwijderen")
-    sel_plaatsen = st.multiselect("Kies duikplaatsen om te verwijderen", plaatsen, key="beheer_del_plaatsen")
-    if st.button("Verwijder geselecteerde duikplaatsen", disabled=(len(sel_plaatsen) == 0), key="btn_del_plaatsen"):
-        ok, n, err = delete_plaatsen(sel_plaatsen)
-        if ok:
-            st.success(f"Verwijderd: {n} duikplaats(en).")
-            st.rerun()
-        else:
-            st.error(f"Verwijderen mislukt: {err}")
-
-    st.divider()
-    st.subheader("Nieuwe duikplaats")
-    np = st.text_input("Nieuwe duikplaats", key="beheer_new_plaats")
-    if st.button("Toevoegen aan duikplaatsen", key="btn_add_plaats"):
-        if np and (np not in plaatsen):
-            try:
-                add_plaats(np)
-                st.success(f"Duikplaats '{np}' toegevoegd.")
+        st.divider()
+        st.subheader("Duikplaatsen verwijderen")
+        sel_plaatsen = st.multiselect("Kies duikplaatsen om te verwijderen", plaatsen, key="beheer_del_plaatsen")
+        if st.button("Verwijder geselecteerde duikplaatsen", disabled=(len(sel_plaatsen) == 0), key="btn_del_plaatsen"):
+            ok, n, err = delete_plaatsen(sel_plaatsen)
+            if ok:
+                st.success(f"Verwijderd: {n} duikplaats(en).")
                 st.rerun()
-            except Exception as e:
-                st.error(f"Toevoegen mislukt: {e}")
-        else:
-            st.warning("Leeg of al bestaand.")
+            else:
+                st.error(f"Verwijderen mislukt: {err}")
 
+        st.divider()
+        st.subheader("Nieuwe duikplaats")
+        np = st.text_input("Nieuwe duikplaats", key="beheer_new_plaats")
+        if st.button("Toevoegen aan duikplaatsen", key="btn_add_plaats"):
+            if np and (np not in plaatsen):
+                try:
+                    add_plaats(np)
+                    st.success(f"Duikplaats '{np}' toegevoegd.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Toevoegen mislukt: {e}")
+            else:
+                st.warning("Leeg of al bestaand.")
 
     # ───────────── TAB 3: Back-up & export ─────────────
     with tabs[3]:
