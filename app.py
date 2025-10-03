@@ -654,16 +654,17 @@ def page_duiken():
     sel_duikers = st.multiselect("Duikers", labels)
 
     if current_role() == "admin":
-        with st.expander("➕ Duikplaats toevoegen"):
-            np = st.text_input("Nieuwe duikplaats")
-            if st.button("Toevoegen"):
-                if np and np not in plaatsen:
-                    try:
-                        plaats_add(np); st.success("Duikplaats toegevoegd."); st.rerun()
-                    except Exception as e:
-                        st.error(f"Mislukt: {e}")
-                else:
-                    st.warning("Leeg of al bestaand.")
+    with st.expander("➕ Duikplaats toevoegen"):
+        np2 = st.text_input("Nieuwe duikplaats", key="np_duiken")
+        if st.button("Toevoegen", key="add_place_duiken"):
+            if np2 and np2 not in plaatsen:
+                try:
+                    plaats_add(np2); st.success("Duikplaats toegevoegd."); st.rerun()
+                except Exception as e:
+                    st.error(f"Mislukt: {e}")
+            else:
+                st.warning("Leeg of al bestaand.")
+
 
     if st.button("Opslaan duik(en)", type="primary", disabled=(not sel_duikers or plaats == "— kies —")):
         rows = [{"datum": datum.isoformat(), "plaats": plaats, "duiker": lab.replace(", ", " "), "duikcode": duikcode or ""} for lab in sel_duikers]
