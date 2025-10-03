@@ -27,7 +27,7 @@ APP_BUILD = "v2025-10-03-LOCAL-USER-LOGIN"
 def inject_css():
     st.markdown("""
     <style>
-      .badge {border:1px solid #e5e7eb;padding:4px 10px;border-radius:999px;background:#fff;}
+      .badge {border:1px solid #e5e7eb;padding:4px 10px;border-radius:999px;background:#f7f9fc;}
       .stButton > button{border-radius:10px;}
     </style>
     """, unsafe_allow_html=True)
