@@ -899,8 +899,9 @@ def page_beheer():
         st.subheader("Duikplaatsen")
         pl = plaatsen_list()
         st.dataframe(pd.DataFrame({"Plaats": pl}), use_container_width=True, hide_index=True)
-        np = st.text_input("Nieuwe duikplaats")
-        if st.button("Toevoegen"):
+        np = st.text_input("Nieuwe duikplaats", key="np_beheer")
+if st.button("Toevoegen", key="add_place_beheer"):
+
             if np and np not in pl:
                 try:
                     plaats_add(np); st.success("Duikplaats toegevoegd."); st.rerun()
