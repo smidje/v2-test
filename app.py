@@ -858,6 +858,12 @@ def main():
     if not st.session_state.get("sb_session"):
         login_page(); return
 
+    def is_readonly() -> bool:
+    # Lees optioneel een noodslot uit secrets.toml
+    # [app]
+    # force_readonly = false
+    return bool(st.secrets.get("app", {}).get("force_readonly", False))
+
     role=current_role()
     st.markdown(
         f"<div class='badge'>Ingelogd als: <b>{current_username() or '—'}</b> · Rol: <b>{role}</b>"
