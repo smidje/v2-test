@@ -527,7 +527,8 @@ def page_activiteiten():
                 if not titel or not datum:
                     st.warning("Titel en datum zijn verplicht.")
                 else:
-                    meal_opts = [x.strip() for x in [mo1, mo2, m3.text_input if False else mo3] if x and x.strip()]  # nosec
+                    meal_opts = [x.strip() for x in [mo1, mo2, mo3] if x and x.strip()]
+
                     try:
                         activiteit_add(titel, omschr, datum, tijd, locatie, meal_opts or None, created_by=current_username())
                         st.success("Activiteit aangemaakt."); st.rerun()
