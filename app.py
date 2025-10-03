@@ -902,18 +902,31 @@ def page_beheer():
     with tabs[0]:
         page_ledenbeheer()
 
+    def page_beheer():
+    require_role("admin")
+    appbar("beheer")
+    st.header("Beheer")
+    tabs = st.tabs(["Ledenbeheer", "Duikers", "Duikplaatsen", "Back-up/Export"])
+
+    with tabs[0]:
+        page_ledenbeheer()
+
     with tabs[1]:
-        res = run_db(lambda c: c.table("duikers").select("voornaam, achternaam, naam, rest_saldo").execute(),
-                     what="duikers select (beheer)")
+        res = run_db(
+            lambda c: c.table("duikers").select("voornaam, achternaam, naam, rest_saldo").execute(),
+            what="duikers select (beheer)"
+        )
         ddf = pd.DataFrame(res.data or [])
         st.subheader("Duikers (afgeleid uit leden met duikbrevet)")
         if not ddf.empty:
-            view = ddf.rename(columns={"voornaam":"Voornaam","achternaam":"Achternaam","rest_saldo":"Rest (start)"})
+            view = ddf.rename(
+                columns={"voornaam": "Voornaam", "achternaam": "Achternaam", "rest_saldo": "Rest (start)"}
+            )
             st.dataframe(view, use_container_width=True, hide_index=True)
         else:
             st.caption("Nog geen duikers — geef duikbrevet aan een lid in Ledenbeheer.")
 
-       with tabs[2]:
+    with tabs[2]:
         st.subheader("Duikplaatsen")
         pl = plaatsen_list()
         st.dataframe(pd.DataFrame({"Plaats": pl}), use_container_width=True, hide_index=True)
@@ -930,8 +943,6 @@ def page_beheer():
             else:
                 st.warning("Leeg of al bestaand.")
 
-
-
     with tabs[3]:
         st.subheader("Back-up (Excel)")
         if st.button("Maak back-up"):
@@ -940,19 +951,22 @@ def page_beheer():
             plaatsen_df = run_db(lambda c: c.table("duikplaatsen").select("*").execute(), what="duikplaatsen select (backup)")
             duiken = run_db(lambda c: c.table("duiken").select("*").execute(), what="duiken select (backup)")
             leden = run_db(lambda c: c.table("leden").select("*").execute(), what="leden select (backup)")
-            df_duikers=pd.DataFrame(duikers.data or [])
-            df_plaatsen=pd.DataFrame(plaatsen_df.data or [])
-            df_duiken=pd.DataFrame(duiken.data or [])
-            df_leden=pd.DataFrame(leden.data or [])
-            stamp=dt.utcnow().strftime("%Y%m%d_%H%M%S")
+            df_duikers = pd.DataFrame(duikers.data or [])
+            df_plaatsen = pd.DataFrame(plaatsen_df.data or [])
+            df_duiken = pd.DataFrame(duiken.data or [])
+            df_leden = pd.DataFrame(leden.data or [])
+            stamp = dt.utcnow().strftime("%Y%m%d_%H%M%S")
             with pd.ExcelWriter(out, engine="openpyxl") as w:
                 df_duikers.to_excel(w, index=False, sheet_name="duikers")
                 df_plaatsen.to_excel(w, index=False, sheet_name="duikplaatsen")
                 df_duiken.to_excel(w, index=False, sheet_name="duiken")
                 df_leden.to_excel(w, index=False, sheet_name="leden")
-            st.download_button("⬇️ Download back-up", data=out.getvalue(),
-                               file_name=f"anww_backup_{stamp}.xlsx",
-                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.download_button(
+                "⬇️ Download back-up",
+                data=out.getvalue(),
+                file_name=f"anww_backup_{stamp}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
 # ──────────────────────────────────────────────────────────────────────────────
 # MAIN — na login meteen Activiteiten
