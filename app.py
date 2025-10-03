@@ -78,21 +78,36 @@ def run_db(fn, *, tries=2, backoff=0.5, what="db"):
             if i < tries: time.sleep(backoff*i); continue
             st.error(f"Onverwachte fout bij {what}: {e}"); st.stop()
 
-# ────────────────────────────── Rollen/session
-def current_role() -> str:
-    user = (st.session_state.get("sb_user") or {})
-    meta = user.get("user_metadata") or {}
-    r = (meta.get("app_role") or "").strip().lower()
-    return r if r in {"admin","user","member","viewer"} else "viewer"
 def current_username() -> str:
-    user = (st.session_state.get("sb_user") or {})
+    user = st.session_state.get("sb_user") or {}
+    email = (user.get("email") or "").lower().strip()
+    row = _leden_row_by_email(email)
+    if row and row.get("username"):
+        return (row.get("username") or "").strip()
     meta = user.get("user_metadata") or {}
     return (meta.get("username") or "").strip()
-def is_readonly() -> bool:
-    return bool(st.secrets.get("app", {}).get("force_readonly", False))
-def require_role(*allowed):
-    if current_role() not in allowed:
-        st.error("Onvoldoende rechten."); st.stop()
+
+# ────────────────────────────── Rollen/session
+@st.cache_data(ttl=30)
+def _leden_row_by_email(email: str):
+    if not email:
+        return None
+    try:
+        res = run_db(lambda c: c.table("leden").select("*").eq("email", email.lower().strip()).limit(1).execute(),
+                     what="leden by email")
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception:
+        return None
+
+def current_role() -> str:
+    user = st.session_state.get("sb_user") or {}
+    email = (user.get("email") or "").lower().strip()
+    row = _leden_row_by_email(email)
+    role = (row or {}).get("role") or ""
+    role = role.strip().lower()
+    return role if role in {"admin","user","member","viewer"} else "viewer"
+
 
 # ────────────────────────────── DB helpers (duikers/duiken/afrekening)
 def list_plaatsen() -> list[str]:
