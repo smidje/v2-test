@@ -1,6 +1,6 @@
-# app.py — ANWW Duikapp (Supabase Auth + RLS + Wachtwoord vergeten + Mijn profiel)
+# app.py — ANWW Duikapp (Supabase Auth + RLS + Activiteiten-first + Profiel PW change)
 # Build tag
-APP_BUILD = "v2025-10-03-ANWW-AUTH-PROFILE-01"
+APP_BUILD = "v2025-10-03-ANWW-AUTH-PROFILE-02"
 
 import streamlit as st
 from datetime import datetime as dt
@@ -9,9 +9,6 @@ import pandas as pd
 import io
 import time
 import math
-import smtplib, ssl
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 
 from supabase import create_client, Client
 from postgrest.exceptions import APIError
@@ -60,8 +57,7 @@ def inject_theme():
     }
     .stTabs [role="tab"]{ color:var(--muted); border-bottom:2px solid transparent; }
     .stTabs [role="tab"][aria-selected="true"]{ color:var(--text); border-bottom:2px solid var(--accent); }
-    .stDataFrame thead tr th{ background: color-mix(in srgb, var(--card) 80%, var(--accent) 20%); color:var(--text); }
-    .stAlert [role="alert"]{ border:1px solid var(--border); background:var(--card); color:var(--text); }
+    .badge{ border:1px solid var(--border); padding:4px 10px; border-radius:999px; font-size:0.9rem; background:var(--card); }
     """
     st.markdown(f"<style>{css_vars}{page}</style>", unsafe_allow_html=True)
 
@@ -77,7 +73,7 @@ def get_anon_client() -> Client:
     url = supa.get("url") or os.getenv("SUPABASE_URL")
     key = supa.get("anon_key") or os.getenv("SUPABASE_ANON_KEY")
     if not url or not key:
-        st.error("Supabase configuratie ontbreekt: zet `supabase.url` en `supabase.anon_key` in st.secrets.")
+        st.error("Supabase configuratie ontbreekt: zet `supabase.url` en `supabase.anon_key` in st.secrets of env vars.")
         st.stop()
     try:
         return create_client(url, key)
@@ -272,19 +268,14 @@ def get_signups(activiteit_id: str) -> pd.DataFrame:
         what="signups select"
     )
     df = pd.DataFrame(res.data or [])
-
-    # Verwachte kolommen afdwingen zodat downstream code nooit KeyError krijgt
-    expected = ["username", "lid_id", "status", "eating", "meal_choice", "signup_ts"]
+    expected = ["id","activiteit_id","username","lid_id","status","eating","meal_choice","signup_ts"]
     for col in expected:
         if col not in df.columns:
             df[col] = None
-
-    # Sorteerbare tijdskolom
     try:
         df["signup_ts"] = pd.to_datetime(df["signup_ts"], errors="coerce")
     except Exception:
         pass
-
     return df
 
 def upsert_signup(activiteit_id: str, username: str | None, lid_id: str | None,
@@ -314,7 +305,7 @@ def upsert_signup(activiteit_id: str, username: str | None, lid_id: str | None,
         run_db(lambda c: c.table("activity_signups").insert(payload).execute(), what="signups insert")
 
 # ──────────────────────────────
-# Weekly digest (helper)
+# Weekly digest (optioneel helper)
 # ──────────────────────────────
 def build_weekly_digest_html(days_ahead=14) -> str:
     today = datetime.date.today()
@@ -377,7 +368,8 @@ def login_page():
             st.warning("Vul eerst je e-mailadres in en klik dan op 'Wachtwoord vergeten?'.")
             return
         try:
-            # eventueel: redirect_to via st.secrets["auth"]["reset_redirect_to"]
+            # optioneel: redirect URL via st.secrets["auth"]["reset_redirect_to"]
+            # sb_anon.auth.reset_password_email(email, {"redirect_to": st.secrets.get("auth", {}).get("reset_redirect_to")})
             sb_anon.auth.reset_password_email(email)
             st.success("Als dit e-mailadres bestaat, is er een reset-link verzonden.")
         except Exception as e:
@@ -482,7 +474,7 @@ def page_overzicht():
 
     st.divider()
     st.subheader("Duiken verwijderen (volgens huidige filter)")
-    st.caption("Selecteer één of meerdere duiken en klik op 'Verwijder geselecteerde'. Dit kan niet ongedaan worden gemaakt.")
+    st.caption("Selecteer één of meerdere duiken en klik op 'Verwijder geselecteerde'.")
 
     def _label(row):
         dc = row.get("Duikcode") or row.get("duikcode") or ""
@@ -719,11 +711,12 @@ def page_beheer():
                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 def page_activiteiten():
-    require_role("admin","user","member")  # viewer ziet niet
+    require_role("admin","user","member")
     if is_readonly(): st.warning("Read-only modus actief — inschrijven kan geblokkeerd zijn.")
     appbar("activiteiten")
     st.header("Kalender & Inschrijvingen")
 
+    # Admin: nieuwe activiteit
     if current_role() == "admin":
         with st.expander("➕ Nieuwe activiteit"):
             c1, c2 = st.columns([2,1])
@@ -740,64 +733,121 @@ def page_activiteiten():
             with m2: mo2 = st.text_input("Optie 2", key="act_m2")
             with m3: mo3 = st.text_input("Optie 3", key="act_m3")
             if st.button("Activiteit toevoegen", type="primary", key="act_add"):
-                if not titel or not datum: st.warning("Titel en datum zijn verplicht.")
+                if not titel or not datum:
+                    st.warning("Titel en datum zijn verplicht.")
                 else:
-                    meal_opts = [x.strip() for x in [mo1, mo2, mo3] if x and x.strip()]
-                    try: add_activiteit(titel, omschr, datum, tijd, locatie, meal_opts or None, created_by=current_username()); st.success("Activiteit aangemaakt."); st.rerun()
-                    except Exception as e: st.error(f"Mislukt: {e}")
+                    meal_opts = [x.strip() for x in [mo1, mo2, m3] if x and x.strip()] if (m3:=mo3) else [x.strip() for x in [mo1, mo2] if x and x.strip()]
+                    try:
+                        add_activiteit(titel, omschr, datum, tijd, locatie, meal_opts or None, created_by=current_username())
+                        st.success("Activiteit aangemaakt.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Mislukt: {e}")
 
-    try: df = list_activiteiten(upcoming_only=True)
+    # Lijst activiteiten (toekomst) gesorteerd op datum/tijd
+    try:
+        df = list_activiteiten(upcoming_only=True)
     except Exception as e:
-        st.warning(f"Kan activiteiten niet laden (RLS/tabellen?): {e}"); return
-    if df.empty: st.info("Geen (toekomstige) activiteiten."); return
+        st.warning(f"Kan activiteiten niet laden (RLS/tabellen?): {e}")
+        return
+
+    if df.empty:
+        st.info("Geen (toekomstige) activiteiten.")
+        return
 
     my_username = current_username()
     my_lid = leden_van_username(my_username)
     my_lid_id = (my_lid or {}).get("id")
 
-    for _, row in df.iterrows():
-        with st.container(border=True):
-            st.subheader(f"{row['titel']} — {pd.to_datetime(row['datum']).strftime('%d/%m/%Y')}" + (f" · {row['tijd']}" if row.get('tijd') else ""))
-            st.caption((row.get("locatie") or "").strip())
-            if row.get("omschrijving"): st.write(row["omschrijving"])
-            try: s = get_signups(row["id"])
-            except Exception as e: st.warning(f"Inschrijvingen niet beschikbaar: {e}"); continue
+    for _, row in df.sort_values(["datum","tijd"], na_position="last").iterrows():
+        s = get_signups(row["id"])
 
-            coming = s[s["status"]=="yes"].sort_values("signup_ts")
-            notcoming = s[s["status"]=="no"].sort_values("signup_ts")
+        # Bepaal mijn status
+        myrow = None
+        if my_username:
+            tmp = s.loc[s["username"] == my_username]
+            if not tmp.empty: myrow = tmp
+        if (myrow is None or myrow.empty) and my_lid_id:
+            tmp = s.loc[s["lid_id"] == my_lid_id]
+            if not tmp.empty: myrow = tmp
+        my_status = (myrow.iloc[0]["status"] if (myrow is not None and not myrow.empty) else None)
+        badge = "🟢 ingeschreven" if my_status == "yes" else ("🔴 niet ingeschreven" if my_status == "no" else "⚪ nog niet gekozen")
+
+        titel = f"{row['titel']} — {pd.to_datetime(row['datum']).strftime('%d/%m/%Y')}"
+        if row.get('tijd'): titel += f" · {row['tijd']}"
+
+        with st.expander(f"{titel}   ·   {badge}", expanded=False):
+            if row.get("locatie"):
+                st.caption(row["locatie"])
+            if row.get("omschrijving"):
+                st.write(row["omschrijving"])
+
+            # Wie komt / wie niet — gesorteerd op inschrijfmoment
+            coming = s.loc[s["status"]=="yes"].sort_values("signup_ts")
+            notcoming = s.loc[s["status"]=="no"].sort_values("signup_ts")
+
             colA, colB = st.columns(2)
             with colA:
                 st.markdown("**Komen (op volgorde van inschrijving):**")
-                if coming.empty: st.caption("Nog niemand.")
+                if coming.empty:
+                    st.caption("Nog niemand.")
                 else:
                     for _, ss in coming.iterrows():
                         meal = f" · eet: {ss['meal_choice']}" if ss.get("eating") else ""
                         st.write(f"- {ss.get('username') or 'lid'}{meal}")
             with colB:
                 st.markdown("**Niet komen:**")
-                if notcoming.empty: st.caption("Nog niemand.")
+                if notcoming.empty:
+                    st.caption("Nog niemand.")
                 else:
-                    for _, ss in notcoming.iterrows(): st.write(f"- {ss.get('username') or 'lid'}")
+                    for _, ss in notcoming.iterrows():
+                        st.write(f"- {ss.get('username') or 'lid'}")
 
             st.divider()
             st.markdown("**Mijn inschrijving**")
-            status = st.radio("Status", options=["Ik kom", "Ik kom niet"], horizontal=True, key=f"st_{row['id']}")
-            eating = None; meal_choice = None
+
+            # Prefills
+            prev_eating = False
+            prev_meal = None
+            if myrow is not None and not myrow.empty:
+                if pd.notna(myrow.iloc[0].get("eating")):
+                    prev_eating = bool(myrow.iloc[0].get("eating"))
+                pm = myrow.iloc[0].get("meal_choice")
+                prev_meal = pm if isinstance(pm, str) and pm.strip() else None
+
+            # UI
+            init_index = 0 if my_status in (None, "yes") else 1
+            status = st.radio("Status", options=["Ik kom", "Ik kom niet"], horizontal=True,
+                              key=f"st_{row['id']}", index=init_index)
+            eating = None
+            meal_choice = None
             meal_opts = row.get("meal_options") or []
             if status == "Ik kom":
-                eating = st.checkbox("Ik eet mee", key=f"eat_{row['id']}")
+                eating = st.checkbox("Ik eet mee", value=prev_eating, key=f"eat_{row['id']}")
                 if eating and meal_opts:
-                    meal_choice = st.selectbox("Kies je maaltijd", ["— kies —"] + meal_opts, key=f"meal_{row['id']}")
-                    if meal_choice == "— kies —": meal_choice = None
+                    default_ix = 0
+                    if prev_meal and prev_meal in meal_opts:
+                        default_ix = meal_opts.index(prev_meal) + 1
+                    mc = st.selectbox("Kies je maaltijd", ["— kies —"] + meal_opts, index=default_ix, key=f"meal_{row['id']}")
+                    meal_choice = None if mc == "— kies —" else mc
+
             if st.button("Bewaar mijn keuze", key=f"save_{row['id']}", type="primary", disabled=is_readonly()):
                 try:
-                    upsert_signup(row["id"], my_username or None, my_lid_id or None,
-                                  "yes" if status=="Ik kom" else "no", eating, meal_choice)
-                    st.success("Inschrijving bijgewerkt."); st.rerun()
-                except Exception as e: st.error(f"Opslaan mislukt: {e}")
+                    upsert_signup(
+                        activiteit_id=row["id"],
+                        username=my_username or None,
+                        lid_id=my_lid_id or None,
+                        status=("yes" if status == "Ik kom" else "no"),
+                        eating=eating,
+                        meal_choice=meal_choice
+                    )
+                    st.success("Inschrijving bijgewerkt.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Opslaan mislukt: {e}")
 
 # ──────────────────────────────
-# Mijn profiel
+# Mijn profiel (incl. wachtwoord wijzigen)
 # ──────────────────────────────
 def set_opt_in_weekly_by_lid_id(lid_id: str, opt_in: bool):
     run_db(lambda c: c.table("leden").update({"opt_in_weekly": bool(opt_in)}).eq("id", lid_id).execute(),
@@ -819,8 +869,10 @@ def page_profiel():
         st.markdown(f"**Gebruikersnaam:** {uname}")
         st.markdown(f"**Rol:** {role}")
     with c2:
-        st.info("Wachtwoord wijzigen? Gebruik 'Wachtwoord vergeten?' op het login-scherm; je ontvangt een reset-link per e-mail.")
+        st.info("Wachtwoord vergeten? Klik op het login-scherm op 'Wachtwoord vergeten?'. "
+                "Ben je ingelogd, dan kan je hieronder je wachtwoord rechtstreeks wijzigen.")
 
+    # Opt-in wekelijkse mail (indien gekoppeld in leden)
     my_lid = leden_van_username((meta.get("username") or "").strip())
     if my_lid:
         st.divider()
@@ -834,12 +886,32 @@ def page_profiel():
         st.divider()
         st.caption("Geen ledenrecord gevonden voor je gebruikersnaam — vraag een admin om je aan de ledenlijst te koppelen als je de wekelijkse mail wilt beheren.")
 
+    # Wachtwoord wijzigen (ingelogd)
+    st.divider()
+    st.subheader("Wachtwoord wijzigen")
+    npw1 = st.text_input("Nieuw wachtwoord", type="password", key="pw1")
+    npw2 = st.text_input("Bevestig nieuw wachtwoord", type="password", key="pw2")
+    if st.button("Wijzig wachtwoord", key="btn_change_pw"):
+        if not npw1 or len(npw1) < 8:
+            st.warning("Kies een wachtwoord van minstens 8 tekens.")
+        elif npw1 != npw2:
+            st.warning("Wachtwoorden komen niet overeen.")
+        else:
+            try:
+                sess = st.session_state.get("sb_session") or {}
+                sb_anon.auth.set_session(sess.get("access_token"), sess.get("refresh_token"))
+                sb_anon.auth.update_user({"password": npw1})
+                st.success("Wachtwoord gewijzigd. Log uit en opnieuw in met je nieuwe wachtwoord.")
+            except Exception as e:
+                st.error(f"Kon wachtwoord niet wijzigen: {e}")
+
 # ──────────────────────────────
-# Main
+# Main: Activiteiten als eerste tab na login
 # ──────────────────────────────
 def main():
     if not st.session_state.get("sb_session"):
-        login_page(); return
+        login_page()
+        return
 
     role = current_role()
     st.markdown(
@@ -849,21 +921,20 @@ def main():
         unsafe_allow_html=True
     )
 
-    # Altijd 'Mijn profiel' erbij
     if role == "admin" and not is_readonly():
-        tabs = st.tabs(["Duiken invoeren","Overzicht","Afrekening","Activiteiten","Beheer","Mijn profiel"])
-        with tabs[0]: page_duiken()
-        with tabs[1]: page_overzicht()
-        with tabs[2]: page_afrekening()
-        with tabs[3]: page_activiteiten()
+        tabs = st.tabs(["Activiteiten","Duiken invoeren","Overzicht","Afrekening","Beheer","Mijn profiel"])
+        with tabs[0]: page_activiteiten()
+        with tabs[1]: page_duiken()
+        with tabs[2]: page_overzicht()
+        with tabs[3]: page_afrekening()
         with tabs[4]: page_beheer()
         with tabs[5]: page_profiel()
     elif role == "user":
-        tabs = st.tabs(["Duiken invoeren","Overzicht","Afrekening","Activiteiten","Mijn profiel"])
-        with tabs[0]: page_duiken()
-        with tabs[1]: page_overzicht()
-        with tabs[2]: page_afrekening()
-        with tabs[3]: page_activiteiten()
+        tabs = st.tabs(["Activiteiten","Duiken invoeren","Overzicht","Afrekening","Mijn profiel"])
+        with tabs[0]: page_activiteiten()
+        with tabs[1]: page_duiken()
+        with tabs[2]: page_overzicht()
+        with tabs[3]: page_afrekening()
         with tabs[4]: page_profiel()
     elif role == "member":
         tabs = st.tabs(["Activiteiten","Mijn profiel"])
