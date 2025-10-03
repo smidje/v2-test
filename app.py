@@ -858,7 +858,7 @@ def main():
     if not st.session_state.get("sb_session"):
         login_page(); return
 
-    def is_readonly() -> bool:
+ def is_readonly() -> bool:
     # Lees optioneel een noodslot uit secrets.toml
     # [app]
     # force_readonly = false
