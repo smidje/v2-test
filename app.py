@@ -263,9 +263,29 @@ def add_activiteit(titel: str, omschrijving: str, datum: datetime.date, tijd: da
     run_db(lambda c: c.table("activiteiten").insert(payload).execute(), what="activiteiten insert")
 
 def get_signups(activiteit_id: str) -> pd.DataFrame:
-    res = run_db(lambda c: c.table("activity_signups").select("*").eq("activiteit_id", activiteit_id).order("signup_ts").execute(),
-                 what="signups select")
-    return pd.DataFrame(res.data or [])
+    res = run_db(
+        lambda c: c.table("activity_signups")
+                    .select("*")
+                    .eq("activiteit_id", activiteit_id)
+                    .order("signup_ts")
+                    .execute(),
+        what="signups select"
+    )
+    df = pd.DataFrame(res.data or [])
+
+    # Verwachte kolommen afdwingen zodat downstream code nooit KeyError krijgt
+    expected = ["username", "lid_id", "status", "eating", "meal_choice", "signup_ts"]
+    for col in expected:
+        if col not in df.columns:
+            df[col] = None
+
+    # Sorteerbare tijdskolom
+    try:
+        df["signup_ts"] = pd.to_datetime(df["signup_ts"], errors="coerce")
+    except Exception:
+        pass
+
+    return df
 
 def upsert_signup(activiteit_id: str, username: str | None, lid_id: str | None,
                   status: str, eating: bool | None, meal_choice: str | None):
