@@ -913,20 +913,23 @@ def page_beheer():
         else:
             st.caption("Nog geen duikers — geef duikbrevet aan een lid in Ledenbeheer.")
 
-    with tabs[2]:
+    w    with tabs[2]:
         st.subheader("Duikplaatsen")
         pl = plaatsen_list()
         st.dataframe(pd.DataFrame({"Plaats": pl}), use_container_width=True, hide_index=True)
-        np = st.text_input("Nieuwe duikplaats", key="np_beheer")
-if st.button("Toevoegen", key="add_place_beheer"):
 
+        np = st.text_input("Nieuwe duikplaats", key="np_beheer")
+        if st.button("Toevoegen", key="add_place_beheer", disabled=is_readonly()):
             if np and np not in pl:
                 try:
-                    plaats_add(np); st.success("Duikplaats toegevoegd."); st.rerun()
+                    plaats_add(np)
+                    st.success("Duikplaats toegevoegd.")
+                    st.rerun()
                 except Exception as e:
                     st.error(f"Mislukt: {e}")
             else:
                 st.warning("Leeg of al bestaand.")
+
 
     with tabs[3]:
         st.subheader("Back-up (Excel)")
