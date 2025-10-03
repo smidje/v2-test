@@ -640,9 +640,10 @@ def page_activiteiten():
                            file_name="weekmail_activiteiten.csv", mime="text/csv")
 
 def page_duiken():
-    require_role("admin","user")
+    require_role("admin", "user")
     if is_readonly():
         st.warning("Read-only modus actief — opslaan uitgeschakeld.")
+
     appbar("duiken")
     st.header("Duiken invoeren")
 
@@ -654,25 +655,41 @@ def page_duiken():
     plaats = st.selectbox("Duikplaats", ["— kies —"] + plaatsen, index=0)
     sel_duikers = st.multiselect("Duikers", labels)
 
+    # Admin mag hier ook meteen een nieuwe duikplaats toevoegen (met unieke keys)
     if current_role() == "admin":
-    with st.expander("➕ Duikplaats toevoegen"):
-        np2 = st.text_input("Nieuwe duikplaats", key="np_duiken")
-        if st.button("Toevoegen", key="add_place_duiken"):
-            if np2 and np2 not in plaatsen:
-                try:
-                    plaats_add(np2); st.success("Duikplaats toegevoegd."); st.rerun()
-                except Exception as e:
-                    st.error(f"Mislukt: {e}")
-            else:
-                st.warning("Leeg of al bestaand.")
+        with st.expander("➕ Duikplaats toevoegen"):
+            np2 = st.text_input("Nieuwe duikplaats", key="np_duiken")
+            if st.button("Toevoegen", key="add_place_duiken"):
+                if np2 and np2 not in plaatsen:
+                    try:
+                        plaats_add(np2)
+                        st.success("Duikplaats toegevoegd.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Mislukt: {e}")
+                else:
+                    st.warning("Leeg of al bestaand.")
 
-
-    if st.button("Opslaan duik(en)", type="primary", disabled=(not sel_duikers or plaats == "— kies —")):
-        rows = [{"datum": datum.isoformat(), "plaats": plaats, "duiker": lab.replace(", ", " "), "duikcode": duikcode or ""} for lab in sel_duikers]
+    if st.button(
+        "Opslaan duik(en)",
+        type="primary",
+        disabled=(not sel_duikers or plaats == "— kies —" or is_readonly())
+    ):
+        rows = [
+            {
+                "datum": datum.isoformat(),
+                "plaats": plaats,
+                "duiker": label.replace(", ", " "),
+                "duikcode": duikcode or ""
+            }
+            for label in sel_duikers
+        ]
         try:
-            duiken_insert(rows); st.success(f"{len(rows)} duik(en) opgeslagen.")
+            duiken_insert(rows)
+            st.success(f"{len(rows)} duik(en) opgeslagen.")
         except Exception as e:
             st.error(f"Opslaan mislukt: {e}")
+
 
 def page_overzicht():
     require_role("admin","user")
