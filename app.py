@@ -913,7 +913,7 @@ def page_beheer():
         else:
             st.caption("Nog geen duikers — geef duikbrevet aan een lid in Ledenbeheer.")
 
-    w    with tabs[2]:
+       with tabs[2]:
         st.subheader("Duikplaatsen")
         pl = plaatsen_list()
         st.dataframe(pd.DataFrame({"Plaats": pl}), use_container_width=True, hide_index=True)
@@ -929,6 +929,7 @@ def page_beheer():
                     st.error(f"Mislukt: {e}")
             else:
                 st.warning("Leeg of al bestaand.")
+
 
 
     with tabs[3]:
