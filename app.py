@@ -897,15 +897,6 @@ def page_beheer():
     require_role("admin")
     appbar("beheer")
     st.header("Beheer")
-    tabs = st.tabs(["Ledenbeheer","Duikers","Duikplaatsen","Back-up/Export"])
-
-    with tabs[0]:
-        page_ledenbeheer()
-
-    def page_beheer():
-    require_role("admin")
-    appbar("beheer")
-    st.header("Beheer")
     tabs = st.tabs(["Ledenbeheer", "Duikers", "Duikplaatsen", "Back-up/Export"])
 
     with tabs[0]:
