@@ -28,14 +28,13 @@ def inject_css():
     st.markdown("""
     <style>
       :root{
-        /* jouw palet */
-        --background: #8DAEBA;           /* = Streamlit backgroundColor */
+        --background: #8DAEBA;           /* jouw backgroundColor */
         --surface: #99883F;
-        --card: #A38B16;                 /* = Streamlit secondaryBackgroundColor */
+        --card: #A38B16;                 /* jouw secondaryBackgroundColor */
         --border: #2a355a;
-        --text: #11064D;                 /* = Streamlit textColor */
+        --text: #11064D;                 /* jouw textColor */
         --muted: #9fb0d9;
-        --primary: #728DCC;              /* = Streamlit primaryColor */
+        --primary: #728DCC;              /* jouw primaryColor */
         --primary-contrast: #453A06;
         --accent: #22d3ee;
         --success: #3CA133;
@@ -43,18 +42,18 @@ def inject_css():
         --error: #ef4444;
       }
 
-      /* Achtergrond & tekst (optioneel: als je puur Streamlit-theme wil zien, comment deze 2 regels uit) */
-      html, body, [class*="stAppViewContainer"] {
-        background-color: var(--background);
-        color: var(--text);
+      /* Achtergrond en tekst (zet je basis look meteen goed) */
+      .stApp, [data-testid="stAppViewContainer"] {
+        background: var(--background) !important;
+        color: var(--text) !important;
       }
 
-      /* Kaarten/panelen: subtiele tint (optioneel) */
-      [data-testid="stSidebar"], .stExpander, .stTabs, .stTabs [data-baseweb="tab-list"] {
+      /* Sidebar/panel randjes */
+      [data-testid="stSidebar"], .stExpander, .stTabs [data-baseweb="tab-list"]{
         border-color: var(--border) !important;
       }
 
-      /* Knoppen – visueel, de basiskleur komt al uit primaryColor */
+      /* Knoppen – kleur komt normaal uit theme.primaryColor; we geven extra styling mee */
       .stButton > button, .stDownloadButton > button {
         border-radius: 10px;
         border: 2px solid var(--border);
@@ -67,10 +66,16 @@ def inject_css():
         transform: translateY(-1px);
       }
 
-      /* Extra varianten (optioneel, te gebruiken via HTML snippet) */
-      .stButton.success > button { background-color: var(--success); color: #fff; border-color: var(--success); }
-      .stButton.warning > button { background-color: var(--warning); color: #000; border-color: var(--warning); }
-      .stButton.error   > button { background-color: var(--error);   color: #fff; border-color: var(--error); }
+      /* Variant-knoppen (te gebruiken via HTML wrappers indien gewenst) */
+      .stButton.success > button { background-color: var(--success) !important; color: #fff !important; border-color: var(--success) !important; }
+      .stButton.warning > button { background-color: var(--warning) !important; color: #000 !important; border-color: var(--warning) !important; }
+      .stButton.error   > button { background-color: var(--error)   !important; color: #fff !important; border-color: var(--error)   !important; }
+
+      /* Datatabellen header */
+      [data-testid="stDataFrame"] thead tr th {
+        background: var(--muted) !important;
+        color: #111 !important;
+      }
 
       /* Badges */
       .badge { 
@@ -85,14 +90,8 @@ def inject_css():
         margin: 2px;
       }
       .badge.success{ background: var(--success); color: #fff; border-color: var(--success); }
-      .badge.warn{ background: var(--warning); color: #000; border-color: var(--warning); }
-      .badge.error{ background: var(--error); color: #fff; border-color: var(--error); }
-
-      /* Tabellen: header kleurtje */
-      [data-testid="stDataFrame"] thead tr th {
-        background: var(--muted) !important; 
-        color: #111 !important;
-      }
+      .badge.warn{    background: var(--warning); color: #000; border-color: var(--warning); }
+      .badge.error{   background: var(--error);   color: #fff; border-color: var(--error); }
     </style>
     """, unsafe_allow_html=True)
 
