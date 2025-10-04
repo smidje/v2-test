@@ -1,13 +1,13 @@
-[theme]  # ← dit is de app-thema sectie die mijn code leest
-backgroundColor = "#8DAEBA"
-surface = "#99883F"
-card = "#A38B16"
-border = "#2a355a"
-textcolor = "#11064D"            # ← 1 hekje
-muted = "#9fb0d9"
-primary = "#728DCC"
-primary_contrast = "#453A06"
-accent = "#22d3ee"
-success = "#3CA133"
-warning = "#f59e0b"
-error = "#ef4444"
+# ================================
+# .streamlit/config.toml
+# ANWW DuikApp - kleurthema
+# ================================
+
+[theme]
+# Basis Streamlit kleuren
+primaryColor = "#728DCC"              # primaire knopkleur
+backgroundColor = "#8DAEBA"           # algemene achtergrond
+secondaryBackgroundColor = "#A38B16"  # panelen / expanders / tabs
+textColor = "#11064D"                 # hoofdtekst
+font = "sans serif"
+
