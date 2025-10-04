@@ -714,7 +714,9 @@ def page_activiteiten():
                     st.warning("Niets geselecteerd.")
                 else:
                     try:
-                        activiteiten_delete(ids)
+                        run_db(lambda c: c.table("activiteiten").delete().in_("id", ids).execute(),
+                        what="activiteiten delete")
+
                         st.success(f"Verwijderd: {len(ids)} activiteit(en).")
                         st.rerun()
                     except Exception as e:
