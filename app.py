@@ -28,12 +28,14 @@ def inject_css():
     st.markdown("""
     <style>
       :root{
+        /* jouw palet */
+        --background: #8DAEBA;           /* = Streamlit backgroundColor */
         --surface: #99883F;
-        --card: #A38B16;
+        --card: #A38B16;                 /* = Streamlit secondaryBackgroundColor */
         --border: #2a355a;
-        --text: #11064D;
+        --text: #11064D;                 /* = Streamlit textColor */
         --muted: #9fb0d9;
-        --primary: #728DCC;
+        --primary: #728DCC;              /* = Streamlit primaryColor */
         --primary-contrast: #453A06;
         --accent: #22d3ee;
         --success: #3CA133;
@@ -41,37 +43,34 @@ def inject_css():
         --error: #ef4444;
       }
 
-      /* Algemene lay-out */
+      /* Achtergrond & tekst (optioneel: als je puur Streamlit-theme wil zien, comment deze 2 regels uit) */
       html, body, [class*="stAppViewContainer"] {
-        background-color: var(--surface);
+        background-color: var(--background);
         color: var(--text);
       }
 
-      /* Kaarten en containers */
-      [data-testid="stVerticalBlock"] {
-        background-color: var(--background);
+      /* Kaarten/panelen: subtiele tint (optioneel) */
+      [data-testid="stSidebar"], .stExpander, .stTabs, .stTabs [data-baseweb="tab-list"] {
+        border-color: var(--border) !important;
       }
 
-      /* Knoppen */
+      /* Knoppen – visueel, de basiskleur komt al uit primaryColor */
       .stButton > button, .stDownloadButton > button {
         border-radius: 10px;
         border: 2px solid var(--border);
         padding: 0.5em 1.2em;
         font-weight: 600;
-        color: var(--primary-contrast);
-        background-color: var(--primary);
         transition: all 0.2s ease;
       }
-
-      .stButton > button:hover {
-        filter: brightness(1.1);
+      .stButton > button:hover, .stDownloadButton > button:hover {
+        filter: brightness(1.07);
         transform: translateY(-1px);
       }
 
-      /* Succes-, waarschuwing- en foutknoppen (optioneel via HTML classes) */
-      .stButton.success > button { background-color: var(--success); color: white; }
-      .stButton.warning > button { background-color: var(--warning); color: black; }
-      .stButton.error   > button { background-color: var(--error); color: white; }
+      /* Extra varianten (optioneel, te gebruiken via HTML snippet) */
+      .stButton.success > button { background-color: var(--success); color: #fff; border-color: var(--success); }
+      .stButton.warning > button { background-color: var(--warning); color: #000; border-color: var(--warning); }
+      .stButton.error   > button { background-color: var(--error);   color: #fff; border-color: var(--error); }
 
       /* Badges */
       .badge { 
@@ -80,39 +79,23 @@ def inject_css():
         padding: 4px 10px;
         font-weight: 500;
         font-size: 0.85em;
-        background: #fff4;
+        background: #ffffff44;
         border: 1px solid var(--border);
         color: var(--text);
         margin: 2px;
       }
-
       .badge.success{ background: var(--success); color: #fff; border-color: var(--success); }
       .badge.warn{ background: var(--warning); color: #000; border-color: var(--warning); }
       .badge.error{ background: var(--error); color: #fff; border-color: var(--error); }
 
-      /* Tabellen */
-      [data-testid="stDataFrame"] table {
-        border-radius: 6px;
-        overflow: hidden;
-      }
-
+      /* Tabellen: header kleurtje */
       [data-testid="stDataFrame"] thead tr th {
-        background: var(--muted) !important;
-        color: var(--text) !important;
+        background: var(--muted) !important; 
+        color: #111 !important;
       }
-
-      /* Expander headers en tabs */
-      .stExpander, .stTabs [data-baseweb="tab-list"] {
-        border: 1px solid var(--border) !important;
-      }
-
-      /* Divider accent */
-      hr, .stDivider {
-        border-top: 2px solid var(--primary);
-      }
-
     </style>
     """, unsafe_allow_html=True)
+
 
 
 def is_readonly() -> bool:
