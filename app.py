@@ -503,91 +503,127 @@ def page_ledenbeheer():
                 st.error(f"Reset mislukt: {e}")
 
 def page_activiteiten():
-    # Iedereen ziet; inschrijven: admin/user/member
+    # Iedereen kan zien; inschrijven: admin/user/member
     appbar("activiteiten")
     st.header("Kalender & Inschrijvingen")
 
-    # Admin: activiteit toevoegen (max 3 meal opties)
+    # ──────────────────────────────────────────────────────────────────────────
+    # ADMIN: activiteit toevoegen (incl. locatie uit duikplaatsen en 3 meal-opties)
+    # ──────────────────────────────────────────────────────────────────────────
     if current_role() == "admin":
         with st.expander("➕ Nieuwe activiteit"):
-            c1, c2 = st.columns([2,1])
+            c1, c2 = st.columns([2, 1])
             with c1:
                 titel = st.text_input("Titel*")
                 omschr = st.text_area("Omschrijving")
             with c2:
                 datum = st.date_input("Datum*", value=datetime.date.today())
                 tijd = st.time_input("Tijd (optioneel)", value=None)
-                locatie = st.text_input("Locatie")
+
+                # Locatie uit duikplaatsen + snel toevoegen
+                pl = plaatsen_list()
+                locatie = st.selectbox("Locatie", ["— kies —"] + pl, index=0, key="act_loc_select")
+                new_loc = st.text_input("Nieuwe locatie (indien niet in lijst)", key="act_new_loc")
+                if st.button("➕ Locatie toevoegen", key="act_add_loc_btn", disabled=is_readonly()):
+                    if new_loc and new_loc not in pl:
+                        try:
+                            plaats_add(new_loc)
+                            st.success("Locatie toegevoegd. Kies nu uit de lijst.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Mislukt: {e}")
+                    else:
+                        st.warning("Leeg of al bestaand.")
+
             st.caption("Maaltijdopties (max. 3, optioneel)")
             m1, m2, m3 = st.columns(3)
-            with m1: mo1 = st.text_input("Optie 1")
-            with m2: mo2 = st.text_input("Optie 2")
-            with m3: mo3 = st.text_input("Optie 3")
-            if st.button("Activiteit toevoegen", type="primary"):
+            with m1: mo1 = st.text_input("Optie 1", key="act_meal1")
+            with m2: mo2 = st.text_input("Optie 2", key="act_meal2")
+            with m3: mo3 = st.text_input("Optie 3", key="act_meal3")
+
+            if st.button("Activiteit toevoegen", type="primary", key="act_add_btn", disabled=is_readonly()):
                 if not titel or not datum:
                     st.warning("Titel en datum zijn verplicht.")
                 else:
                     meal_opts = [x.strip() for x in [mo1, mo2, mo3] if x and x.strip()]
-
                     try:
-                        activiteit_add(titel, omschr, datum, tijd, locatie, meal_opts or None, created_by=current_username())
-                        st.success("Activiteit aangemaakt."); st.rerun()
+                        activiteit_add(
+                            titel=titel,
+                            omschr=omschr,
+                            datum=datum,
+                            tijd=tijd,
+                            locatie=None if not locatie or locatie == "— kies —" else locatie.strip(),
+                            meal_opts=meal_opts or None,
+                            created_by=current_username() or current_email()
+                        )
+                        st.success("Activiteit aangemaakt.")
+                        st.rerun()
                     except Exception as e:
                         st.error(f"Mislukt: {e}")
 
-    # Overzicht
+    # ──────────────────────────────────────────────────────────────────────────
+    # Overzicht komende activiteiten
+    # ──────────────────────────────────────────────────────────────────────────
     df = activiteiten_list_df(upcoming=True)
     if df.empty:
         st.info("Geen (toekomstige) activiteiten.")
         return
 
-    # Bepaal identiteit voor inschrijven
+    # Identiteit voor inschrijven
     my_username = current_username()
     my_lid = leden_get_by_username(my_username)
     my_lid_id = (my_lid or {}).get("id")
 
-    for _, row in df.sort_values(["datum","tijd"], na_position="last").iterrows():
+    # Toon activiteiten (gesorteerd op datum/tijd)
+    for _, row in df.sort_values(["datum", "tijd"], na_position="last").iterrows():
         s = signups_get(row["id"])
 
-        # mijn status
+        # mijn huidige status
         myrow = None
         if my_username:
             tmp = s.loc[s["username"] == my_username]
-            if not tmp.empty: myrow = tmp
+            if not tmp.empty:
+                myrow = tmp
         if (myrow is None or myrow.empty) and my_lid_id:
             tmp = s.loc[s["lid_id"] == my_lid_id]
-            if not tmp.empty: myrow = tmp
+            if not tmp.empty:
+                myrow = tmp
         my_status = (myrow.iloc[0]["status"] if (myrow is not None and not myrow.empty) else None)
         badge = "🟢 ingeschreven" if my_status == "yes" else ("🔴 niet ingeschreven" if my_status == "no" else "⚪ nog niet gekozen")
 
         titel = f"{row['titel']} — {pd.to_datetime(row['datum']).strftime('%d/%m/%Y')}"
-        if row.get("tijd"): titel += f" · {row['tijd']}"
+        if row.get("tijd"):
+            titel += f" · {row['tijd']}"
 
         with st.expander(f"{titel}   ·   {badge}", expanded=False):
-            if row.get("locatie"): st.caption(row["locatie"])
-            if row.get("omschrijving"): st.write(row["omschrijving"])
+            if row.get("locatie"):
+                st.caption(f"📍 {row['locatie']}")
+            if row.get("omschrijving"):
+                st.write(row["omschrijving"])
 
-            # Lijsten (gesorteerd op signup_ts)
-            coming = s.loc[s["status"]=="yes"].sort_values("signup_ts")
-            notcoming = s.loc[s["status"]=="no"].sort_values("signup_ts")
+            # Lijsten op volgorde van inschrijving
+            coming = s.loc[s["status"] == "yes"].sort_values("signup_ts")
+            notcoming = s.loc[s["status"] == "no"].sort_values("signup_ts")
 
             colA, colB = st.columns(2)
             with colA:
                 st.markdown("**Komen (op volgorde van inschrijving):**")
-                if coming.empty: st.caption("Nog niemand.")
+                if coming.empty:
+                    st.caption("Nog niemand.")
                 else:
                     for _, ss in coming.iterrows():
                         meal = f" · eet: {ss['meal_choice']}" if ss.get("eating") else ""
                         st.write(f"- {ss.get('username') or 'lid'}{meal}")
             with colB:
                 st.markdown("**Niet komen:**")
-                if notcoming.empty: st.caption("Nog niemand.")
+                if notcoming.empty:
+                    st.caption("Nog niemand.")
                 else:
                     for _, ss in notcoming.iterrows():
                         st.write(f"- {ss.get('username') or 'lid'}")
 
-            # Inschrijven — alleen admin/user/member
-            if current_role() in {"admin","user","member"} and not is_readonly():
+            # Inschrijven — admin/user/member
+            if current_role() in {"admin", "user", "member"} and not is_readonly():
                 st.divider()
                 st.markdown("**Mijn inschrijving**")
                 prev_eating, prev_meal = False, None
@@ -621,23 +657,92 @@ def page_activiteiten():
                             eating=eating,
                             meal_choice=meal_choice
                         )
-                        st.success("Inschrijving bijgewerkt."); st.rerun()
+                        st.success("Inschrijving bijgewerkt.")
+                        st.rerun()
                     except Exception as e:
                         st.error(f"Opslaan mislukt: {e}")
 
+            # Print/Export per activiteit
+            st.markdown("---")
+            st.markdown("**Afdrukvoorbeeld / export van inschrijvingen**")
+            print_df = s[["username", "status", "eating", "meal_choice", "signup_ts"]].copy()
+            print_df = print_df.rename(columns={
+                "username": "Gebruiker",
+                "status": "Status",
+                "eating": "Eet mee",
+                "meal_choice": "Maaltijd",
+                "signup_ts": "Ingeschreven op"
+            })
+            if not print_df.empty:
+                print_df["Ingeschreven op"] = pd.to_datetime(print_df["Ingeschreven op"]).dt.strftime("%d/%m/%Y %H:%M")
+            st.dataframe(print_df, use_container_width=True, hide_index=True)
+            buf = io.BytesIO()
+            print_df.to_csv(buf, index=False)
+            st.download_button(
+                "⬇️ Download CSV van inschrijvingen",
+                data=buf.getvalue(),
+                file_name=f"inschrijvingen_{row['titel']}_{row['datum']}.csv",
+                mime="text/csv",
+                key=f"csv_{row['id']}"
+            )
+            st.caption("Tip: gebruik je browser-print (Ctrl/Cmd + P) op deze pagina voor papier/PDF.")
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # ADMIN: activiteiten verwijderen (toekomstige)
+    # ──────────────────────────────────────────────────────────────────────────
+    if current_role() == "admin":
+        st.divider()
+        st.subheader("Activiteiten verwijderen")
+        df_del = activiteiten_list_df(upcoming=True).sort_values(["datum", "tijd"], na_position="last")
+        if df_del.empty:
+            st.caption("Geen toekomstige activiteiten.")
+        else:
+            options, id_map = [], {}
+            for _, r in df_del.iterrows():
+                datum_str = pd.to_datetime(r["datum"]).strftime("%d/%m/%Y")
+                tijd_str = f" · {r['tijd']}" if r.get("tijd") else ""
+                loc_str = f" · {r['locatie']}" if r.get("locatie") else ""
+                label = f"{datum_str}{tijd_str} · {r['titel']}{loc_str}"
+                options.append(label)
+                id_map[label] = r["id"]
+
+            sel_labels = st.multiselect("Selecteer activiteiten om te verwijderen", options, key="del_act_sel")
+            if st.button("Verwijder geselecteerde activiteiten", key="del_act_btn", type="primary",
+                         disabled=is_readonly() or not sel_labels):
+                ids = [id_map[lbl] for lbl in sel_labels if lbl in id_map]
+                if not ids:
+                    st.warning("Niets geselecteerd.")
+                else:
+                    try:
+                        activiteiten_delete(ids)
+                        st.success(f"Verwijderd: {len(ids)} activiteit(en).")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Verwijderen mislukt: {e}")
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Wekelijkse mail preview/export (eerstvolgende 4)
+    # ──────────────────────────────────────────────────────────────────────────
     st.divider()
     st.subheader("Wekelijkse mail — eerstvolgende 4 activiteiten")
     st.caption("Gebruik als preview/export. Voor automatisch versturen op maandag 08:00 heb je een scheduler nodig.")
-    df2 = activiteiten_list_df(upcoming=True).sort_values(["datum","tijd"], na_position="last").head(4)
+    df2 = activiteiten_list_df(upcoming=True).sort_values(["datum", "tijd"], na_position="last").head(4)
     if df2.empty:
         st.info("Geen komende activiteiten.")
     else:
-        view = df2[["titel","datum","tijd","locatie"]].copy()
+        view = df2[["titel", "datum", "tijd", "locatie"]].copy()
         view["datum"] = pd.to_datetime(view["datum"]).dt.strftime("%d/%m/%Y")
         st.dataframe(view, use_container_width=True, hide_index=True)
-        out = io.BytesIO(); view.to_csv(out, index=False)
-        st.download_button("⬇️ Exporteer CSV (mailbijlage)", data=out.getvalue(),
-                           file_name="weekmail_activiteiten.csv", mime="text/csv")
+        out = io.BytesIO()
+        view.to_csv(out, index=False)
+        st.download_button(
+            "⬇️ Exporteer CSV (mailbijlage)",
+            data=out.getvalue(),
+            file_name="weekmail_activiteiten.csv",
+            mime="text/csv",
+            key="weekmail_csv"
+        )
+
 
 def page_duiken():
     require_role("admin", "user")
