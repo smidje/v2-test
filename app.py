@@ -27,11 +27,93 @@ APP_BUILD = "v2025-10-03-LOCAL-USER-LOGIN"
 def inject_css():
     st.markdown("""
     <style>
-      .badge {border:1px solid #e5e7eb;padding:4px 10px;border-radius:999px;background:#f7f9fc;}
-      .stButton > button{border-radius:10px;}
+      :root{
+        --surface: #99883F;
+        --card: #A38B16;
+        --border: #2a355a;
+        --text: #11064D;
+        --muted: #9fb0d9;
+        --primary: #728DCC;
+        --primary-contrast: #453A06;
+        --accent: #22d3ee;
+        --success: #3CA133;
+        --warning: #f59e0b;
+        --error: #ef4444;
+      }
+
+      /* Algemene lay-out */
+      html, body, [class*="stAppViewContainer"] {
+        background-color: var(--surface);
+        color: var(--text);
+      }
+
+      /* Kaarten en containers */
+      [data-testid="stVerticalBlock"] {
+        background-color: var(--background);
+      }
+
+      /* Knoppen */
+      .stButton > button, .stDownloadButton > button {
+        border-radius: 10px;
+        border: 2px solid var(--border);
+        padding: 0.5em 1.2em;
+        font-weight: 600;
+        color: var(--primary-contrast);
+        background-color: var(--primary);
+        transition: all 0.2s ease;
+      }
+
+      .stButton > button:hover {
+        filter: brightness(1.1);
+        transform: translateY(-1px);
+      }
+
+      /* Succes-, waarschuwing- en foutknoppen (optioneel via HTML classes) */
+      .stButton.success > button { background-color: var(--success); color: white; }
+      .stButton.warning > button { background-color: var(--warning); color: black; }
+      .stButton.error   > button { background-color: var(--error); color: white; }
+
+      /* Badges */
+      .badge { 
+        display: inline-block;
+        border-radius: 999px;
+        padding: 4px 10px;
+        font-weight: 500;
+        font-size: 0.85em;
+        background: #fff4;
+        border: 1px solid var(--border);
+        color: var(--text);
+        margin: 2px;
+      }
+
+      .badge.success{ background: var(--success); color: #fff; border-color: var(--success); }
+      .badge.warn{ background: var(--warning); color: #000; border-color: var(--warning); }
+      .badge.error{ background: var(--error); color: #fff; border-color: var(--error); }
+
+      /* Tabellen */
+      [data-testid="stDataFrame"] table {
+        border-radius: 6px;
+        overflow: hidden;
+      }
+
+      [data-testid="stDataFrame"] thead tr th {
+        background: var(--muted) !important;
+        color: var(--text) !important;
+      }
+
+      /* Expander headers en tabs */
+      .stExpander, .stTabs [data-baseweb="tab-list"] {
+        border: 1px solid var(--border) !important;
+      }
+
+      /* Divider accent */
+      hr, .stDivider {
+        border-top: 2px solid var(--primary);
+      }
+
     </style>
     """, unsafe_allow_html=True)
-inject_css()
+
 
 def is_readonly() -> bool:
     return bool(st.secrets.get("app", {}).get("force_readonly", False))
