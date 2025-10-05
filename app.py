@@ -600,19 +600,23 @@ else:
                     st.error(f"Opslaan mislukt: {e}")
 
     if submitted:
-        if not username:
-        st.warning("Login (username) is verplicht."); return
-        # leden.email is uniek en verplicht; maak lokaal e-mailadres als admin het leeg laat
-        email_eff = (email or "").strip().lower() or f"{username.strip()}@local"
-        payload = {
-            "email": email_eff,
-            "voornaam": (vn or "").strip(),
-            "achternaam": (an or "").strip(),
-            "username": username.strip(),
-            "role": role,
-            "duikbrevet": None if brevet == "(geen)" else brevet,
-            "opt_in_weekly": bool(optin),
-            "actief": bool(actief)
+    if not username:
+        st.warning("Login (username) is verplicht.")
+        st.stop()
+
+    # leden.email is uniek en verplicht; maak lokaal e-mailadres als admin het leeg laat
+    email_eff = (email or "").strip().lower() or f"{username.strip()}@local"
+    payload = {
+        "email": email_eff,
+        "voornaam": (vn or "").strip(),
+        "achternaam": (an or "").strip(),
+        "username": username.strip(),
+        "role": role,
+        "duikbrevet": None if brevet == "(geen)" else brevet,
+        "opt_in_weekly": bool(optin),
+        "actief": bool(actief)
+    }
+
         }
         try:
             leden_upsert(payload)
