@@ -666,6 +666,50 @@ else:
                     st.success("Wachtwoord gereset.")
             except Exception as e:
                 st.error(f"Reset mislukt: {e}")
+    # ──────────────────────────────────────────────────────────────
+    # Leden toevoegen of bewerken
+    # ──────────────────────────────────────────────────────────────
+    st.subheader("Lid toevoegen of bewerken")
+
+    with st.form("add_member"):
+        vn = st.text_input("Voornaam")
+        an = st.text_input("Achternaam")
+        username = st.text_input("Login (username)")
+        email = st.text_input("E-mail")
+        brevet = st.selectbox("Duikbrevet", ["(geen)", "k1", "1ster", "2ster", "3ster", "4ster", "as-Inst", "1*Ins", "2*Ins", "3*Ins"])
+        role = st.selectbox("Rol", ["viewer", "member", "user", "admin"])
+        optin = st.checkbox("Ontvang wekelijkse mail?")
+        actief = st.checkbox("Actief lid", value=True)
+
+        submitted = st.form_submit_button("Opslaan", type="primary")
+
+        if submitted:
+            if not username:
+                st.warning("Login (username) is verplicht.")
+                st.stop()
+
+            # leden.email is uniek en verplicht; maak lokaal e-mailadres als admin het leeg laat
+            email_eff = (email or "").strip().lower() or f"{username.strip()}@local"
+
+            payload = {
+                "email": email_eff,
+                "voornaam": (vn or "").strip(),
+                "achternaam": (an or "").strip(),
+                "username": username.strip(),
+                "role": role,
+                "duikbrevet": None if brevet == "(geen)" else brevet,
+                "opt_in_weekly": bool(optin),
+                "actief": bool(actief)
+            }
+
+            # Probeer te bewaren in Supabase
+            try:
+                run_db(lambda c: c.table("leden").upsert(payload, on_conflict="username").execute(),
+                       what="leden upsert")
+                st.success(f"Lid '{username}' toegevoegd of bijgewerkt.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Fout bij opslaan: {e}")
 
 def page_activiteiten():
     # Iedereen kan zien; inschrijven: admin/user/member
