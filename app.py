@@ -801,63 +801,7 @@ def page_activiteiten():
         )
 
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # ADMIN: activiteiten verwijderen (toekomstige)
-    # ──────────────────────────────────────────────────────────────────────────
-    if current_role() == "admin":
-        st.divider()
-        st.subheader("Activiteiten verwijderen")
-        df_del = activiteiten_list_df(upcoming=True).sort_values(["datum", "tijd"], na_position="last")
-        if df_del.empty:
-            st.caption("Geen toekomstige activiteiten.")
-        else:
-            options, id_map = [], {}
-            for _, r in df_del.iterrows():
-                datum_str = pd.to_datetime(r["datum"]).strftime("%d/%m/%Y")
-                tijd_str = f" · {r['tijd']}" if r.get("tijd") else ""
-                loc_str = f" · {r['locatie']}" if r.get("locatie") else ""
-                label = f"{datum_str}{tijd_str} · {r['titel']}{loc_str}"
-                options.append(label)
-                id_map[label] = r["id"]
-
-            sel_labels = st.multiselect("Selecteer activiteiten om te verwijderen", options, key="del_act_sel")
-            if st.button("Verwijder geselecteerde activiteiten", key="del_act_btn", type="primary",
-                         disabled=is_readonly() or not sel_labels):
-                ids = [id_map[lbl] for lbl in sel_labels if lbl in id_map]
-                if not ids:
-                    st.warning("Niets geselecteerd.")
-                else:
-                    try:
-                        run_db(lambda c: c.table("activiteiten").delete().in_("id", ids).execute(),
-                        what="activiteiten delete")
-
-                        st.success(f"Verwijderd: {len(ids)} activiteit(en).")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Verwijderen mislukt: {e}")
-
-    # ──────────────────────────────────────────────────────────────────────────
-    # Wekelijkse mail preview/export (eerstvolgende 4)
-    # ──────────────────────────────────────────────────────────────────────────
-    st.divider()
-    st.subheader("Wekelijkse mail — eerstvolgende 4 activiteiten")
-    st.caption("Gebruik als preview/export. Voor automatisch versturen op maandag 08:00 heb je een scheduler nodig.")
-    df2 = activiteiten_list_df(upcoming=True).sort_values(["datum", "tijd"], na_position="last").head(4)
-    if df2.empty:
-        st.info("Geen komende activiteiten.")
-    else:
-        view = df2[["titel", "datum", "tijd", "locatie"]].copy()
-        view["datum"] = pd.to_datetime(view["datum"]).dt.strftime("%d/%m/%Y")
-        st.dataframe(view, use_container_width=True, hide_index=True)
-        out = io.BytesIO()
-        view.to_csv(out, index=False)
-        st.download_button(
-            "⬇️ Exporteer CSV (mailbijlage)",
-            data=out.getvalue(),
-            file_name="weekmail_activiteiten.csv",
-            mime="text/csv",
-            key="weekmail_csv"
-        )
+   
 
 
 def page_duiken():
