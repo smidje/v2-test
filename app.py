@@ -64,7 +64,7 @@ def inject_css():
     </style>
     """, unsafe_allow_html=True)
 
-
+inject_css()
 
 
 
