@@ -601,7 +601,7 @@ else:
 
     if submitted:
         if not username:
-            st.warning("Login (username) is verplicht."); return
+        st.warning("Login (username) is verplicht."); return
         # leden.email is uniek en verplicht; maak lokaal e-mailadres als admin het leeg laat
         email_eff = (email or "").strip().lower() or f"{username.strip()}@local"
         payload = {
