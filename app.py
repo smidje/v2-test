@@ -617,7 +617,7 @@ else:
         "actief": bool(actief)
     }
 
-        }
+      
         try:
             leden_upsert(payload)
             # auth_local
