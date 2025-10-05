@@ -27,63 +27,83 @@ APP_BUILD = "v2025-10-03-LOCAL-USER-LOGIN"
 def inject_css():
     st.markdown("""
     <style>
-      :root{
-        --background: #8DAEBA;   /* jouw achtergrond */
-        --card: #A38B16;         /* panel/kaarten */
+      /* ====== Kleuren uit jouw palet ====== */
+      :root {
+        --background: #8DAEBA;
+        --secondary: #A38B16;
+        --text: #11064D;
+        --primary: #728DCC;
         --border: #2a355a;
-        --text: #11064D;         /* tekst */
-        --muted: #9fb0d9;
-        --primary: #728DCC;      /* knopkleur */
         --success: #3CA133;
         --warning: #f59e0b;
         --error: #ef4444;
       }
 
-      /* ===== Pagina-achtergrond & tekst ===== */
-      html, body, .stApp, [data-testid="stAppViewContainer"]{
+      /* ====== Achtergrond en tekst ====== */
+      .stApp, [data-testid="stAppViewContainer"], section.main, div.block-container {
         background-color: var(--background) !important;
         color: var(--text) !important;
       }
 
-      /* ===== Sidebar / panel-tint ===== */
-      section[data-testid="stSidebar"] > div {
-        background-color: var(--card) !important;
-      }
-      .stExpander, .stTabs [data-baseweb="tab-list"]{
-        border: 1px solid var(--border) !important;
+      /* ====== Sidebar ====== */
+      section[data-testid="stSidebar"], [data-testid="stSidebarContent"] {
+        background-color: var(--secondary) !important;
       }
 
-      /* ===== Knoppen (alle varianten) ===== */
-      .stButton > button, .stDownloadButton > button {
+      /* ====== Tabs / Expanders ====== */
+      .stTabs [data-baseweb="tab"] {
+        background: var(--secondary) !important;
+        color: #fff !important;
+        border-radius: 5px 5px 0 0;
+        font-weight: 600;
+      }
+      .stTabs [aria-selected="true"] {
         background: var(--primary) !important;
+        color: white !important;
+      }
+
+      .stExpander {
+        border: 1px solid var(--border) !important;
+        background: #ffffff80 !important;
+      }
+
+      /* ====== Knoppen ====== */
+      .stButton > button, .stDownloadButton > button {
+        background-color: var(--primary) !important;
         color: #fff !important;
         border: 2px solid var(--border) !important;
         border-radius: 10px !important;
-        padding: 0.5em 1.2em !important;
+        padding: 0.4em 1em !important;
         font-weight: 600 !important;
-        transition: all .15s ease !important;
+        transition: all 0.15s ease-in-out !important;
       }
       .stButton > button:hover, .stDownloadButton > button:hover {
-        filter: brightness(1.08) !important;
-        transform: translateY(-1px) !important;
+        filter: brightness(1.1) !important;
+        transform: translateY(-1px);
       }
 
-      /* Optionele kleurvarianten (via wrapper class) */
+      /* Varianten voor HTML-knoppen */
       .stButton.success > button { background: var(--success) !important; border-color: var(--success) !important; }
       .stButton.warning > button { background: var(--warning) !important; color:#000 !important; border-color: var(--warning) !important; }
       .stButton.error   > button { background: var(--error)   !important; border-color: var(--error)   !important; }
 
-      /* ===== Tabellen (header) ===== */
+      /* ====== Tabellen ====== */
       [data-testid="stDataFrame"] thead tr th {
-        background: var(--muted) !important;
-        color: #111 !important;
+        background: #ffffff88 !important;
+        color: var(--text) !important;
+      }
+
+      /* ====== Kleine accenten ====== */
+      hr, .stDivider {
+        border-top: 2px solid var(--border) !important;
+      }
+
+      /* ====== Titels ====== */
+      h1, h2, h3, h4, h5 {
+        color: var(--text) !important;
       }
     </style>
     """, unsafe_allow_html=True)
-    st.button("Primaire knop test")
-st.markdown('<div class="stButton success"><button>Succes-knop</button></div>', unsafe_allow_html=True)
-st.markdown('<div class="stButton warning"><button>Waarschuwing-knop</button></div>', unsafe_allow_html=True)
-st.markdown('<div class="stButton error"><button>Verwijderen-knop</button></div>', unsafe_allow_html=True)
 
 
 
