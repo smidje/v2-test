@@ -229,7 +229,8 @@ def current_email() -> str:
 # ──────────────────────────────────────────────────────────────────────────────
 # Tabellen & helpers
 # ──────────────────────────────────────────────────────────────────────────────
-BREVET_CHOICES = ['k1ster','1ster','2ster','3ster','4ster','ass-inst','1*inst','2*inst','3*inst']
+# Gebruik exact de labels van je database-check
+BREVET_CHOICES = ['k1', '1ster', '2ster', '3ster', '4ster', 'as-Inst', '1*Ins', '2*Ins', '3*Ins']
 ROLE_CHOICES = ['admin','user','member','viewer']
 
 def leden_upsert(payload: dict):
