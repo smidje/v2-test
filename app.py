@@ -596,20 +596,44 @@ def page_activiteiten():
                     except Exception as e:
                         st.error(f"Mislukt: {e}")
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # Overzicht komende activiteiten
+        # ──────────────────────────────────────────────────────────────────────────
+    # Overzicht komende activiteiten (gesorteerd) + tellingen
     # ──────────────────────────────────────────────────────────────────────────
     df = activiteiten_list_df(upcoming=True)
     if df.empty:
         st.info("Geen (toekomstige) activiteiten.")
         return
 
+    # sorteer van vroeg -> laat
+    df = df.sort_values(["datum", "tijd"], na_position="last").reset_index(drop=True)
+
+    # Tellingen opbouwen
+    summary_rows = []
+    for _, r in df.iterrows():
+        s = signups_get(r["id"])
+        yes = int((s["status"] == "yes").sum()) if not s.empty else 0
+        no  = int((s["status"] == "no").sum()) if not s.empty else 0
+        summary_rows.append({
+            "Datum": pd.to_datetime(r["datum"]).strftime("%d/%m/%Y"),
+            "Tijd": r.get("tijd") or "",
+            "Titel": r.get("titel") or "",
+            "Locatie": r.get("locatie") or "",
+            "Komen": yes,
+            "Niet komen": no
+        })
+
+    st.subheader("Overzicht (tellingen per activiteit)")
+    if summary_rows:
+        st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+
     # Identiteit voor inschrijven
     my_username = current_username()
     my_lid = leden_get_by_username(my_username)
     my_lid_id = (my_lid or {}).get("id")
 
-    # Toon activiteiten (gesorteerd op datum/tijd)
+    # Toon activiteiten (zelfde volgorde: vroeg -> laat)
+    for _, row in df.iterrows():
+
     for _, row in df.sort_values(["datum", "tijd"], na_position="last").iterrows():
         s = signups_get(row["id"])
 
