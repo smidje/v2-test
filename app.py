@@ -599,13 +599,14 @@ else:
                 except Exception as e:
                     st.error(f"Opslaan mislukt: {e}")
 
-    if submitted:
+   if submitted:
     if not username:
         st.warning("Login (username) is verplicht.")
         st.stop()
 
     # leden.email is uniek en verplicht; maak lokaal e-mailadres als admin het leeg laat
     email_eff = (email or "").strip().lower() or f"{username.strip()}@local"
+
     payload = {
         "email": email_eff,
         "voornaam": (vn or "").strip(),
@@ -616,6 +617,14 @@ else:
         "opt_in_weekly": bool(optin),
         "actief": bool(actief)
     }
+
+    # voorbeeld: wegschrijven naar database
+    try:
+        run_db(lambda c: c.table("leden").upsert(payload, on_conflict="username").execute(),
+               what="leden upsert")
+        st.success(f"Lid '{username}' toegevoegd of bijgewerkt.")
+    except Exception as e:
+        st.error(f"Fout bij opslaan: {e}")
 
       
         try:
