@@ -1,396 +1,1018 @@
-# app.py — ANWW Duikapp (username + wachtwoord) • Build v2025-10-05 • STABIEL BASIS
-# Functies:
-# - Login (username/password) + rol (admin/user/member/viewer)
-# - Kleuren-CSS
-# - Activiteiten (sort: vroeg→laat), inschrijven (Ik kom / Ik kom niet), optionele maaltijdkeuze (max 3)
-# - Locatie uit duikplaatsen (admin kan toevoegen)
-# - CSV export per activiteit
-# - Verwijderen van activiteiten (admin)
-# - Weekmail preview/export (eerstvolgende 4)
+# app.py — ANWW Duikapp (duikers + duikplaatsen toevoegen, delete in Overzicht)
+# Build tag
+APP_BUILD = "v2025-10-01-ANWW-06"
 
 import streamlit as st
-import pandas as pd
+from datetime import datetime as dt
 import datetime
+import pandas as pd
+import bcrypt
 import io
-import hashlib
+import time
+import math
+
 from supabase import create_client, Client
 from postgrest.exceptions import APIError
+import httpx  # voor ConnectError/ReadTimeout
 
-# ──────────────────────────────────────────────────────────────────────────────
-# UI CONFIG + CSS
-# ──────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────
+# Basisconfig & thema
+# ──────────────────────────────
 st.set_page_config(page_title="ANWW Duikapp", layout="wide")
-APP_BUILD = "v2025-10-05-stable-base"
 
-def inject_css():
-    st.markdown("""
-    <style>
-      :root {
-        --bg: #8DAEBA;       /* achtergrond */
-        --panel: #A38B16;    /* panelen/tabs */
-        --text: #11064D;     /* tekst */
-        --primary: #728DCC;  /* knoppen */
-        --border: #2a355a;
-        --success: #3CA133; --warning: #f59e0b; --error: #ef4444;
-      }
-      .stApp, [data-testid="stAppViewContainer"], .main, div.block-container {
-        background-color: var(--bg) !important; color: var(--text) !important;
-      }
-      .stButton > button, .stDownloadButton > button {
-        background-color: var(--primary) !important; color:#fff !important;
-        border: 2px solid var(--border) !important; border-radius: 10px !important;
-        padding:.45em 1.1em !important; font-weight:600 !important;
-      }
-      .muted { opacity:.8; font-style:italic; }
-    </style>
-    """, unsafe_allow_html=True)
+THEME_DEFAULTS = {
+    "bg": "#f7f9fc","surface": "#f0f4ff","card": "#ffffff","border": "#e5e7eb",
+    "text": "#0f172a","muted": "#475569","primary": "#2563eb","primary_contrast": "#ffffff",
+    "accent": "#38bdf8","success": "#16a34a","warning": "#f59e0b","error": "#ef4444",
+}
 
-inject_css()
+def _merge_theme(defaults: dict, overrides: dict | None) -> dict:
+    if not overrides:
+        return defaults
+    out = defaults.copy()
+    for k, v in overrides.items():
+        if isinstance(v, str) and v.strip():
+            out[k] = v.strip()
+    return out
 
-# ──────────────────────────────────────────────────────────────────────────────
-# SUPABASE CLIENT
-# ──────────────────────────────────────────────────────────────────────────────
-@st.cache_resource(show_spinner=False)
+def base_css() -> str:
+    return """
+    .appbar { display:flex; align-items:center; margin-bottom:8px; font-weight:600; }
+    .appbar-left  { display:flex; align-items:center; gap:.5rem; }
+    .appbar-mid   { display:flex; justify-content:center; }
+    .appbar-right { display:flex; justify-content:flex-end; align-items:center; gap:.5rem; }
+    .badge { border:1px solid var(--border); padding:4px 10px; border-radius:999px; font-size:0.9rem; background:var(--card); }
+    """
+
+def inject_theme():
+    theme = _merge_theme(THEME_DEFAULTS, st.secrets.get("theme"))
+    css_vars = f"""
+    :root {{
+      --bg:{theme['bg']}; --surface:{theme['surface']}; --card:{theme['card']}; --border:{theme['border']};
+      --text:{theme['text']}; --muted:{theme['muted']};
+      --primary:{theme['primary']}; --primary-contrast:{theme['primary_contrast']};
+      --accent:{theme['accent']}; --success:{theme['success']}; --warning:{theme['warning']}; --error:{theme['error']};
+    }}
+    """
+    page = """
+    .stApp{ background: radial-gradient(1200px 800px at 20% 10%, var(--surface), var(--bg) 60%); color: var(--text); }
+    .stButton > button{
+        background: var(--primary) !important; color: var(--primary-contrast) !important;
+        border: 1px solid var(--primary) !important; border-radius: 10px !important;
+        box-shadow: 0 4px 14px rgba(0,0,0,.08) !important; transition: all .15s ease;
+    }
+    .stButton > button:hover{ filter:brightness(1.05); transform: translateY(-1px); }
+    .stButton > button:disabled{ opacity:.5 !important; cursor:not-allowed !important; }
+    .stTextInput input, .stNumberInput input, .stDateInput input,
+    .stSelectbox > div > div, .stMultiSelect > div > div{
+        background:var(--card)!important; color:var(--text)!important; border:1px solid var(--border)!important; border-radius:10px!important;
+    }
+    .stTabs [role="tab"]{ color:var(--muted); border-bottom:2px solid transparent; }
+    .stTabs [role="tab"][aria-selected="true"]{ color:var(--text); border-bottom:2px solid var(--accent); }
+    .stDataFrame thead tr th{ background: color-mix(in srgb, var(--card) 80%, var(--accent) 20%); color:var(--text); }
+    .stAlert [role="alert"]{ border:1px solid var(--border); background:var(--card); color:var(--text); }
+    """
+    st.markdown(f"<style>{css_vars}{base_css()}{page}</style>", unsafe_allow_html=True)
+
+inject_theme()
+
+# ──────────────────────────────
+# Supabase client (robust + connectivity check)
+# ──────────────────────────────
+@st.cache_resource
 def get_client() -> Client:
-    url = st.secrets["supabase"]["url"]
-    key = st.secrets["supabase"]["anon_key"]
-    return create_client(url, key)
+    import os
+    supa = st.secrets.get("supabase", {})
+    url = supa.get("url") or os.getenv("SUPABASE_URL")
+    key = supa.get("anon_key") or os.getenv("SUPABASE_ANON_KEY")
 
-sb: Client = get_client()
+    missing = []
+    if not url:
+        missing.append("supabase.url (of SUPABASE_URL)")
+    if not key:
+        missing.append("supabase.anon_key (of SUPABASE_ANON_KEY)")
+    if missing:
+        st.error("Supabase configuratie ontbreekt:\n- " + "\n- ".join(missing))
+        st.stop()
 
-def run_db(fn, what=""):
     try:
-        return fn(sb)
-    except APIError as e:
-        st.error(f"API-fout bij {what}. Controleer tabellen/policy/RLS ({e.code}).")
-        raise
+        client = create_client(url, key)
     except Exception as e:
-        st.error(f"Fout bij {what}: {e}")
-        raise
+        st.error(f"Kon Supabase client niet maken: {e}")
+        st.stop()
 
-# ──────────────────────────────────────────────────────────────────────────────
-# AUTH
-# ──────────────────────────────────────────────────────────────────────────────
-def sha256_hex(s: str) -> str:
-    return hashlib.sha256(s.encode("utf-8")).hexdigest()
+    try:
+        client.table("users").select("username").limit(1).execute()
+    except Exception:
+        pass
+    return client
 
-def auth_check(username: str, password: str):
-    res = run_db(lambda c: c.table("users").select("username,password_hash,role")
-                 .eq("username", username).maybe_single().execute(),
-                 what="users select (login)")
-    if not res.data:
-        return None
-    ph = (res.data or {}).get("password_hash") or ""
-    ok = (ph == sha256_hex(password)) or (ph == password)  # fallback voor legacy plain
-    if not ok:
-        return None
-    return {"username": res.data["username"], "role": (res.data.get("role") or "viewer")}
+sb = get_client()
 
-def current_username(): return st.session_state.get("username")
-def current_role(): return st.session_state.get("role","viewer")
+# Retry wrapper
+def run_db(fn, *, tries=3, backoff=0.6, what="database call"):
+    last_err = None
+    for i in range(1, tries + 1):
+        try:
+            return fn()
+        except (httpx.ConnectError, httpx.ReadTimeout) as e:
+            last_err = e
+            if i < tries:
+                time.sleep(backoff * i)
+                continue
+            st.error(f"Netwerkfout bij {what}: {e}")
+            st.stop()
+        except APIError as e:
+            st.error("API-fout bij {what}. Controleer tabel/policy/RLS voor anon key.")
+            st.caption(str(e))
+            st.stop()
+        except Exception as e:
+            last_err = e
+            if i < tries:
+                time.sleep(backoff * i)
+                continue
+            st.error(f"Onverwachte fout bij {what}: {e}")
+            st.stop()
+    return None
 
-# ──────────────────────────────────────────────────────────────────────────────
-# DATA HELPERS
-# ──────────────────────────────────────────────────────────────────────────────
-def plaatsen_list() -> list[str]:
-    res = run_db(lambda c: c.table("duikplaatsen").select("name").order("name").execute(),
-                 what="duikplaatsen select")
-    return [r["name"] for r in (res.data or [])]
+# ──────────────────────────────
+# Rollen / security
+# ──────────────────────────────
+MAX_ATTEMPTS = 5
+LOCK_MINUTES = 15
+ALLOWED_ROLES = {"admin", "user", "viewer"}
+FORCE_READONLY = bool(st.secrets.get("app", {}).get("force_readonly", False))
 
-def plaats_add(name: str):
-    run_db(lambda c: c.table("duikplaatsen").insert({"name": name}).execute(),
-           what="duikplaats insert")
+def normalize_role(raw) -> str:
+    r = (raw or "user").strip().lower()
+    return r if r in ALLOWED_ROLES else "user"
 
-def activiteit_add(titel, omschr, datum, tijd, locatie, meal_opts, created_by):
-    payload = {
-        "titel": titel,
-        "omschrijving": omschr or None,
-        "datum": datum.isoformat() if hasattr(datum, "isoformat") else datum,
-        "tijd": tijd.strftime("%H:%M") if tijd else None,
-        "locatie": locatie or None,
-        "meal_options": meal_opts or None,
-        "created_by": created_by or None,
-    }
-    run_db(lambda c: c.table("activiteiten").insert(payload).execute(), what="activiteit insert")
+def current_role() -> str:
+    return normalize_role(st.session_state.get("role"))
 
-def activiteiten_df(upcoming=True) -> pd.DataFrame:
-    q = sb.table("activiteiten").select("*")
-    if upcoming:
-        q = q.gte("datum", datetime.date.today().isoformat())
-    q = q.order("datum", desc=False).order("tijd", desc=False)
-    res = run_db(lambda c=q: c.execute(), what="activiteiten select")
-    return pd.DataFrame(res.data or [])
+def is_viewer_effective() -> bool:
+    return FORCE_READONLY or (current_role() == "viewer")
 
-def activiteiten_delete(ids: list[str]):
-    if not ids: return
-    run_db(lambda c: c.table("activiteiten").delete().in_("id", ids).execute(),
-           what="activiteiten delete")
+def _ensure_not_viewer():
+    if is_viewer_effective():
+        raise Exception("Viewer/read-only modus: schrijven is geblokkeerd.")
 
-def signups_get(activiteit_id) -> pd.DataFrame:
-    res = run_db(lambda c: c.table("activity_signups").select("*").eq("activiteit_id", activiteit_id).execute(),
-                 what="signups select")
-    return pd.DataFrame(res.data or [])
+# ──────────────────────────────
+# Helpers naam-splitting
+# ──────────────────────────────
+def _fullname(vn: str | None, an: str | None) -> str:
+    vn = (vn or "").strip()
+    an = (an or "").strip()
+    return (vn + (" " if vn and an else "") + an).strip()
 
-def signup_upsert(activiteit_id, username, status, eating=None, meal_choice=None):
-    if status not in ("yes", "no"):
-        raise ValueError("status moet 'yes' of 'no' zijn")
-    payload = {
-        "activiteit_id": activiteit_id,
-        "username": username,
-        "status": status,
-        "eating": eating if status == "yes" else None,
-        "meal_choice": meal_choice if (status == "yes" and meal_choice) else None,
-    }
-    run_db(lambda c: c.table("activity_signups")
-           .upsert(payload, on_conflict="activiteit_id,username").execute(),
-           what="signup upsert")
+def _split_guess(full: str) -> tuple[str, str]:
+    s = (full or "").strip()
+    if not s:
+        return "", ""
+    parts = s.split()
+    if len(parts) == 1:
+        return "", parts[0]
+    return parts[0], " ".join(parts[1:])
 
-# ──────────────────────────────────────────────────────────────────────────────
-# LOGIN
-# ──────────────────────────────────────────────────────────────────────────────
-def login_page():
-    st.title("Aanmelden")
-    with st.form("login_form"):
-        u = st.text_input("Gebruikersnaam")
-        p = st.text_input("Wachtwoord", type="password")
-        ok = st.form_submit_button("Inloggen", type="primary")
-        if ok:
-            user = auth_check(u.strip(), p)
-            if not user:
-                st.error("Onjuiste inloggegevens.")
+# ──────────────────────────────
+# DB helpers (users/duikers/plaatsen/duiken/afrekeningen)
+# ──────────────────────────────
+def get_user(username: str):
+    res = run_db(lambda: sb.table("users").select("*").eq("username", username).limit(1).execute(),
+                 what="users select")
+    rows = res.data or []
+    return rows[0] if rows else None
+
+def list_admin_usernames() -> list[str]:
+    res = run_db(lambda: sb.table("users").select("username, role").eq("role", "admin").execute(),
+                 what="users (admins)")
+    return [r["username"] for r in (res.data or [])]
+
+def set_password(username: str, new_password: str):
+    _ensure_not_viewer()
+    hashed = bcrypt.hashpw(new_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    run_db(lambda: sb.table("users").update({
+        "password_hash": hashed, "failed_attempts": 0, "locked_until": None
+    }).eq("username", username).execute(), what="users update (password)")
+
+def update_user_role(username: str, new_role: str):
+    _ensure_not_viewer()
+    run_db(lambda: sb.table("users").update({"role": normalize_role(new_role)})
+           .eq("username", username).execute(), what="users update (role)")
+
+def clear_lock(username: str):
+    _ensure_not_viewer()
+    run_db(lambda: sb.table("users").update({"failed_attempts": 0, "locked_until": None})
+           .eq("username", username).execute(), what="users update (unlock)")
+
+def delete_users(usernames: list[str]) -> tuple[bool, int, str | None]:
+    if not usernames:
+        return True, 0, None
+    try:
+        _ensure_not_viewer()
+        run_db(lambda: sb.table("users").delete().in_("username", usernames).execute(),
+               what="users delete")
+        return True, len(usernames), None
+    except Exception as e:
+        return False, 0, str(e)
+
+# ——— DU I K E R S ———
+def list_duikers_weergave() -> list[str]:
+    try:
+        res = run_db(lambda: sb.table("duikers").select("voornaam, achternaam, naam, rest_saldo").execute(),
+                     what="duikers select (split)")
+        rows = res.data or []
+        out = []
+        for r in rows:
+            vn, an = r.get("voornaam"), r.get("achternaam")
+            if (vn is not None) or (an is not None):
+                label = f"{(an or '').strip()}, {(vn or '').strip()}".strip(", ")
+                out.append(label)
             else:
-                st.session_state["username"] = user["username"]
-                st.session_state["role"] = user["role"]
-                st.success(f"Ingelogd als {user['username']} ({user['role']}).")
-                st.rerun()
-    st.caption(f"Build: {APP_BUILD}")
+                out.append((r.get("naam") or "").strip())
 
-# ──────────────────────────────────────────────────────────────────────────────
-# ACTIVITEITEN
-# ──────────────────────────────────────────────────────────────────────────────
-def page_activiteiten():
-    st.header("Kalender & Inschrijvingen")
+        def sort_key(x: str):
+            if "," in x:
+                an, vn = [p.strip() for p in x.split(",", 1)]
+                return (an.lower(), vn.lower())
+            vn, an = _split_guess(x)
+            return (an.lower(), vn.lower())
 
-    # ADMIN: nieuwe activiteit
-    if current_role() == "admin":
-        with st.expander("➕ Nieuwe activiteit"):
-            c1, c2 = st.columns([2,1])
-            with c1:
-                titel = st.text_input("Titel*")
-                omschr = st.text_area("Omschrijving")
-            with c2:
-                datum = st.date_input("Datum*", value=datetime.date.today())
-                tijd = st.time_input("Tijd (optioneel)", value=datetime.time(9, 0))
-                pl = plaatsen_list()
-                locatie = st.selectbox("Locatie", ["— kies —"] + pl, index=0, key="act_loc_select")
-                new_loc = st.text_input("Nieuwe locatie (indien niet in lijst)", key="act_new_loc")
-                if st.button("➕ Locatie toevoegen", key="act_add_loc_btn"):
-                    if new_loc and new_loc not in pl:
-                        try:
-                            plaats_add(new_loc)
-                            st.success("Locatie toegevoegd. Kies nu uit de lijst.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Mislukt: {e}")
-                    else:
-                        st.warning("Leeg of al bestaand.")
+        return sorted([o for o in out if o], key=sort_key)
+    except Exception:
+        res = run_db(lambda: sb.table("duikers").select("naam").order("naam").execute(),
+                     what="duikers select (legacy)")
+        return [r["naam"] for r in (res.data or [])]
 
-            st.caption("Maaltijdopties (max. 3, optioneel)")
-            m1, m2, m3 = st.columns(3)
-            with m1: mo1 = st.text_input("Optie 1", key="act_meal1")
-            with m2: mo2 = st.text_input("Optie 2", key="act_meal2")
-            with m3: mo3 = st.text_input("Optie 3", key="act_meal3")
+def add_duiker_legacy(name: str):
+    _ensure_not_viewer()
+    run_db(lambda: sb.table("duikers").insert({"naam": name}).execute(),
+           what="duikers insert (legacy)")
 
-            if st.button("Activiteit toevoegen", type="primary", key="act_add_btn"):
-                if not titel or not datum:
-                    st.warning("Titel en datum zijn verplicht.")
-                else:
-                    meal_opts = [x.strip() for x in [mo1, mo2, mo3] if x and x.strip()]
-                    try:
-                        activiteit_add(
-                            titel=titel, omschr=omschr, datum=datum, tijd=tijd,
-                            locatie=None if not locatie or locatie == "— kies —" else locatie.strip(),
-                            meal_opts=meal_opts or None,
-                            created_by=current_username()
-                        )
-                        st.success("Activiteit aangemaakt."); st.rerun()
-                    except Exception as e:
-                        st.error(f"Mislukt: {e}")
+def add_duiker_split(vn: str, an: str, rest: float = 0.0):
+    _ensure_not_viewer()
+    payload = {"voornaam": (vn or "").strip(),
+               "achternaam": (an or "").strip(),
+               "naam": _fullname(vn, an),
+               "rest_saldo": float(rest)}
+    run_db(lambda: sb.table("duikers").insert(payload).execute(),
+           what="duikers insert (split)")
 
-    # Lijst activiteiten (vroeg -> laat)
-    df = activiteiten_df(upcoming=True)
-    if df.empty:
-        st.info("Geen (toekomstige) activiteiten.")
+def update_duiker_rest(vn: str, an: str, rest: float):
+    _ensure_not_viewer()
+    run_db(lambda: sb.table("duikers").update({"rest_saldo": float(rest)})
+           .eq("voornaam", (vn or "").strip()).eq("achternaam", (an or "").strip()).execute(),
+           what="duikers update rest")
+
+def delete_duikers(names_or_labels: list[str]) -> tuple[bool, int, str | None]:
+    if not names_or_labels:
+        return True, 0, None
+    try:
+        _ensure_not_viewer()
+        deleted = 0
+        for disp in names_or_labels:
+            if "," in disp:
+                an, vn = [p.strip() for p in disp.split(",", 1)]
+                run_db(lambda: sb.table("duikers").delete().eq("voornaam", vn).eq("achternaam", an).execute(),
+                       what="duikers delete (split)")
+                deleted += 1
+            else:
+                run_db(lambda: sb.table("duikers").delete().eq("naam", disp).execute(),
+                       what="duikers delete (legacy)")
+                deleted += 1
+        return True, deleted, None
+    except Exception as e:
+        return False, 0, str(e)
+
+# ——— P L A A T S E N ———
+def list_plaatsen() -> list[str]:
+    res = run_db(lambda: sb.table("duikplaatsen").select("plaats").order("plaats").execute(),
+                 what="duikplaatsen select")
+    return [r["plaats"] for r in (res.data or [])]
+
+def add_plaats(plaats: str):
+    _ensure_not_viewer()
+    run_db(lambda: sb.table("duikplaatsen").insert({"plaats": plaats}).execute(),
+           what="duikplaatsen insert")
+
+def delete_plaatsen(plaatsen: list[str]) -> tuple[bool, int, str | None]:
+    if not plaatsen:
+        return True, 0, None
+    try:
+        _ensure_not_viewer()
+        run_db(lambda: sb.table("duikplaatsen").delete().in_("plaats", plaatsen).execute(),
+               what="duikplaatsen delete")
+        return True, len(plaatsen), None
+    except Exception as e:
+        return False, 0, str(e)
+
+# ——— D U I K E N ———
+def save_duiken(rows):
+    if rows:
+        _ensure_not_viewer()
+        run_db(lambda: sb.table("duiken").insert(rows).execute(), what="duiken insert")
+
+def fetch_duiken(filters=None) -> pd.DataFrame:
+    def _go():
+        q = sb.table("duiken").select("*")
+        if filters:
+            for k, v in filters.items():
+                if v is None:
+                    continue
+                if k == "datum_eq":
+                    q = q.eq("datum", v)
+                elif k == "plaats_eq":
+                    q = q.eq("plaats", v)
+                elif k == "duikcode_eq":
+                    q = q.eq("duikcode", v)
+                elif k == "datum_gte":
+                    q = q.gte("datum", v)
+                elif k == "datum_lte":
+                    q = q.lte("datum", v)
+                elif k == "duiker_eq":
+                    q = q.eq("duiker", v)
+        return q.order("datum", desc=True).order("plaats").order("duikcode").order("duiker").execute()
+    res = run_db(_go, what="duiken select")
+    return pd.DataFrame(res.data or [])
+
+def delete_duiken_by_ids(ids):
+    if ids:
+        _ensure_not_viewer()
+        run_db(lambda: sb.table("duiken").delete().in_("id", ids).execute(), what="duiken delete")
+
+# ——— A F R E K E N I N G E N ———
+def get_rest_saldo(vn: str, an: str) -> float:
+    res = run_db(lambda: sb.table("duikers").select("rest_saldo")
+                 .eq("voornaam", (vn or "").strip())
+                 .eq("achternaam", (an or "").strip()).limit(1).execute(),
+                 what="duikers rest_saldo")
+    rows = res.data or []
+    return float((rows[0] or {}).get("rest_saldo", 0)) if rows else 0.0
+
+def set_rest_saldo(vn: str, an: str, value: float):
+    update_duiker_rest(vn, an, value)
+
+def insert_afrekening(row: dict):
+    run_db(lambda: sb.table("afrekeningen").insert(row).execute(), what="afrekeningen insert")
+
+# ──────────────────────────────
+# UI helpers
+# ──────────────────────────────
+def appbar(suffix: str):
+    col1, col2, col3 = st.columns([5, 3, 2])
+    with col1:
+        st.markdown("<div class='appbar-left'>ANWW Duikapp</div>", unsafe_allow_html=True)
+    with col2:
+        st.markdown(
+            f"<div class='appbar-mid'><div class='badge'>"
+            f"{st.session_state.get('username','?')} · {normalize_role(st.session_state.get('role'))}"
+            f"</div></div>",
+            unsafe_allow_html=True
+        )
+    with col3:
+        if st.button("Uitloggen", key=f"logout_{suffix}"):
+            st.session_state.clear()
+            st.rerun()
+
+# ──────────────────────────────
+# Pagina's
+# ──────────────────────────────
+def login_page():
+    st.title("ANWW Duikapp")
+    with st.form("login_form", clear_on_submit=False):
+        u = st.text_input("Gebruikersnaam", key="login_user")
+        p = st.text_input("Wachtwoord", type="password", key="login_pw")
+        submitted = st.form_submit_button("Login")
+    if not submitted:
         return
 
-    df = df.sort_values(["datum","tijd"], na_position="last").reset_index(drop=True)
+    if not u or not p:
+        st.error("Vul zowel gebruikersnaam als wachtwoord in.")
+        return
 
-    user = current_username()
+    user = get_user(u)
+    if not user:
+        st.error("Onbekende gebruiker")
+        return
+
+    ph = (user.get("password_hash") or "").encode("utf-8")
+    ok = bcrypt.checkpw(p.encode("utf-8"), ph) if ph else False
+    if ok:
+        st.session_state.logged_in = True
+        st.session_state.username = u
+        st.session_state.role = normalize_role(user.get("role"))
+        st.rerun()
+    else:
+        st.error("Onjuist wachtwoord.")
+
+def page_duiken():
     role = current_role()
+    if is_viewer_effective():
+        st.error("Alleen-lezen gebruiker: geen toegang tot 'Duiken invoeren'.")
+        return
+    appbar("duiken")
 
-    # Lijst (één regel per activiteit + tellers achteraan)
-    for i, row in df.iterrows():
-        rid = str(row.get("id") or f"idx{i}")
-        s = signups_get(row["id"])
+    plaatsen_list = list_plaatsen()
+    place_options = ["— kies —"] + plaatsen_list
 
-        # totals (alleen aantal inschrijvingen; geen V/K)
-        yes_cnt = int((s["status"]=="yes").sum()) if not s.empty else 0
-        no_cnt  = int((s["status"]=="no").sum())  if not s.empty else 0
-        tellers_txt = f"<small class='muted'>({yes_cnt} komen · {no_cnt} niet)</small>"
+    datum = st.date_input("Datum", datetime.date.today(), key="duiken_datum", format="DD/MM/YYYY")
+    duikcode = st.text_input("Duikcode (optioneel, bv. 'Ochtend', 'Duik 1')", key="duiken_duikcode")
+    plaats = st.selectbox("Duikplaats", place_options, index=0, key="duiken_plaats")
 
-        # mijn status
-        myrow = s.loc[s["username"] == user] if (user and not s.empty) else pd.DataFrame()
-        my_status = myrow.iloc[0]["status"] if not myrow.empty else None
-        badge = "🟢" if my_status == "yes" else ("🔴" if my_status == "no" else "⚪")
+    # Duiker-selectie
+    labels = list_duikers_weergave()  # Achternaam, Voornaam
+    sel = st.multiselect("Kies duikers", labels, key="duiken_sel_duikers")
 
-        # regelkop
-        datum_str = pd.to_datetime(row["datum"]).strftime("%d/%m/%Y")
-        tijd_str = f" · {row['tijd']}" if row.get("tijd") else ""
-        titel = f"{datum_str}{tijd_str} — {row['titel']}"
-        loc_str = f" · 📍 {row['locatie']}" if row.get("locatie") else ""
-        st.markdown(f"**{titel}{loc_str}**  {badge} &nbsp;&nbsp; {tellers_txt}", unsafe_allow_html=True)
-
-        with st.expander("Inschrijven / details", expanded=False):
-            if row.get("omschrijving"):
-                st.write(row["omschrijving"])
-
-            coming = s.loc[s["status"]=="yes"].sort_values("signup_ts")
-            notcoming = s.loc[s["status"]=="no"].sort_values("signup_ts")
-
-            colA, colB = st.columns(2)
-            with colA:
-                st.markdown("**Komen (op volgorde van inschrijving):**")
-                if coming.empty:
-                    st.caption("Nog niemand.")
-                else:
-                    for _, ss in coming.iterrows():
-                        meal = f" · eet: {ss['meal_choice']}" if ss.get("eating") else ""
-                        st.write(f"- {ss.get('username') or 'lid'}{meal}")
-            with colB:
-                st.markdown("**Niet komen:**")
-                if notcoming.empty:
-                    st.caption("Nog niemand.")
-                else:
-                    for _, ss in notcoming.iterrows():
-                        st.write(f"- {ss.get('username') or 'lid'}")
-
-            # Inschrijven — admin/user/member
-            if role in {"admin","user","member"}:
-                st.divider()
-                st.markdown("**Mijn inschrijving**")
-
-                prev = myrow.iloc[0] if not myrow.empty else {}
-                prev_eating = bool(prev.get("eating")) if prev is not None else False
-                prev_meal = prev.get("meal_choice") if prev is not None else None
-
-                init_index = 0 if my_status in (None, "yes") else 1
-                status_choice = st.radio("Status", ["Ik kom", "Ik kom niet"], horizontal=True,
-                                         index=init_index, key=f"act_{rid}_status")
-
-                eating = None; meal_choice = None
-                meal_opts = row.get("meal_options") or []
-                if status_choice == "Ik kom":
-                    eating = st.checkbox("Ik eet mee", value=prev_eating, key=f"act_{rid}_eat")
-                    if eating and meal_opts:
-                        default_ix = 0
-                        if prev_meal and prev_meal in meal_opts:
-                            default_ix = (meal_opts.index(prev_meal) + 1)
-                        mc = st.selectbox("Kies je maaltijd", ["— kies —"] + meal_opts,
-                                          index=default_ix, key=f"act_{rid}_meal")
-                        meal_choice = None if mc == "— kies —" else mc
-
-                if st.button("Bewaar mijn keuze", key=f"act_{rid}_save", type="primary"):
-                    try:
-                        signup_upsert(
-                            activiteit_id=row["id"],
-                            username=user,
-                            status=("yes" if status_choice == "Ik kom" else "no"),
-                            eating=eating,
-                            meal_choice=meal_choice
-                        )
-                        st.success("Inschrijving bijgewerkt."); st.rerun()
-                    except Exception as e:
-                        st.error(f"Opslaan mislukt: {e}")
-
-            # Export / print
-            st.markdown("---")
-            st.markdown("**Afdruk / export inschrijvingen**")
-            cols = ["username","status","eating","meal_choice","signup_ts"]
-            cols = [c for c in cols if c in s.columns]
-            print_df = s[cols].copy()
-            print_df = print_df.rename(columns={
-                "username":"Gebruiker","status":"Status","eating":"Eet mee",
-                "meal_choice":"Maaltijd","signup_ts":"Ingeschreven op"
-            })
-            if not print_df.empty and "Ingeschreven op" in print_df.columns:
-                print_df["Ingeschreven op"] = pd.to_datetime(print_df["Ingeschreven op"]).dt.strftime("%d/%m/%Y %H:%M")
-            st.dataframe(print_df, use_container_width=True, hide_index=True)
-            buf = io.BytesIO(); print_df.to_csv(buf, index=False)
-            st.download_button("⬇️ Download CSV", data=buf.getvalue(),
-                               file_name=f"inschrijvingen_{row['titel']}_{row['datum']}.csv",
-                               mime="text/csv", key=f"act_{rid}_csv")
-
-    # ADMIN: verwijderen
     if role == "admin":
-        st.divider()
-        st.subheader("Activiteiten verwijderen")
-        options, id_map = [], {}
-        for _, r in df.iterrows():
-            datum_str = pd.to_datetime(r["datum"]).strftime("%d/%m/%Y")
-            tijd_str = f" · {r['tijd']}" if r.get("tijd") else ""
-            loc_str = f" · {r['locatie']}" if r.get("locatie") else ""
-            label = f"{datum_str}{tijd_str} · {r['titel']}{loc_str}"
-            options.append(label); id_map[label] = r["id"]
-        sel_labels = st.multiselect("Selecteer activiteiten", options, key="del_act_sel_admin")
-        if st.button("Verwijder geselecteerde activiteiten", key="del_act_btn_admin", type="primary",
-                     disabled=not sel_labels):
-            try:
-                ids = [id_map[lbl] for lbl in sel_labels if lbl in id_map]
-                activiteiten_delete(ids)
-                st.success(f"Verwijderd: {len(ids)} activiteit(en)."); st.rerun()
-            except Exception as e:
-                st.error(f"Verwijderen mislukt: {e}")
+        with st.expander("➕ Duiker toevoegen (Voornaam/Achternaam)"):
+            c1, c2, c3 = st.columns([1, 1, 1])
+            with c1:
+                vn = st.text_input("Voornaam", key="new_vn")
+            with c2:
+                an = st.text_input("Achternaam", key="new_an")
+            with c3:
+                rest0 = st.number_input("Start rest (€)", min_value=0.0, step=0.5, value=0.0, key="new_rest")
+            if st.button("Toevoegen", key="btn_add_duiker_split"):
+                if vn or an:
+                    try:
+                        add_duiker_split(vn, an, rest0)
+                        st.success(f"Toegevoegd: {_fullname(vn, an)}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Toevoegen mislukt: {e}")
+                else:
+                    st.warning("Geef minstens voornaam of achternaam.")
 
-    # Weekmail preview/export (eerstvolgende 4)
+        with st.expander("➕ Duikplaats toevoegen"):
+            np = st.text_input("Nieuwe duikplaats", key="new_plaats_invoer")
+            if st.button("Duikplaats toevoegen", key="btn_add_plaats_invoer"):
+                if np and (np not in plaatsen_list):
+                    try:
+                        add_plaats(np)
+                        st.success(f"Duikplaats '{np}' toegevoegd.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Toevoegen mislukt: {e}")
+                else:
+                    st.warning("Leeg of al bestaand.")
+
+    st.markdown("##### Geselecteerde duikers (nog niet opgeslagen)")
+    if sel:
+        st.write(", ".join(sel))
+    else:
+        st.caption("Nog geen duikers geselecteerd.")
+
+    can_save = (plaats != "— kies —") and (len(sel) > 0)
+    if st.button("Opslaan duik(en)", type="primary", disabled=(is_viewer_effective() or not can_save), key="duiken_opslaan"):
+        rows = [{"datum": datum.isoformat(), "plaats": plaats, "duiker": lab.replace(", ", " "), "duikcode": duikcode or ""} for lab in sel]
+        save_duiken(rows)
+        st.success(f"{len(sel)} duik(en) opgeslagen voor {plaats} · {duikcode or '—'} op {datum.strftime('%d/%m/%Y')}.")
+
+def page_overzicht():
+    appbar("overzicht")
+    df = fetch_duiken()
+    if df.empty:
+        st.info("Nog geen duiken geregistreerd.")
+        return
+
+    # Zorg dat 'id' aanwezig is voor delete-acties
+    if "id" not in df.columns:
+        st.warning("Let op: kolom 'id' ontbreekt in 'duiken' tabel — verwijderen werkt dan niet.")
+        df["id"] = None  # failsafe; UI blijft werken zonder delete
+
+    df["Datum"] = pd.to_datetime(df["datum"]).dt.date
+    df["Plaats"] = df["plaats"]
+    df["Duiker"] = df["duiker"]
+    df["Duikcode"] = df["duikcode"].fillna("")
+
+    c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
+    with c1:
+        min_d, max_d = df["Datum"].min(), df["Datum"].max()
+        rng = st.date_input("Datumrange", (min_d, max_d), format="DD/MM/YYYY")
+    with c2:
+        plaatsen = ["Alle"] + sorted(df["Plaats"].dropna().unique().tolist())
+        pf = st.selectbox("Duikplaats", plaatsen, index=0)
+    with c3:
+        codes = ["Alle"] + sorted([c if c else "—" for c in df["Duikcode"].fillna("").unique().tolist()])
+        cf = st.selectbox("Duikcode", codes, index=0)
+    with c4:
+        duikers = ["Alle"] + sorted(df["Duiker"].dropna().unique().tolist())
+        dfilt = st.selectbox("Duiker", duikers, index=0)
+
+    start, end = rng if isinstance(rng, tuple) else (df["Datum"].min(), df["Datum"].max())
+    f = df[(df["Datum"] >= start) & (df["Datum"] <= end)].copy()
+    if pf != "Alle":
+        f = f[f["Plaats"] == pf]
+    if cf != "Alle":
+        f = f[f["Duikcode"].replace({"": "—"}) == cf]
+    if dfilt != "Alle":
+        f = f[f["Duiker"] == dfilt]
+
+    f = f.sort_values(["Datum", "Plaats", "Duikcode", "Duiker", "id"]).reset_index(drop=True)
+
+    # Weergave-tabel (zonder id)
+    view = f[["Datum", "Plaats", "Duiker", "Duikcode"]].copy()
+    view["Datum"] = pd.to_datetime(view["Datum"]).dt.strftime("%d/%m/%Y")
+    st.dataframe(view, use_container_width=True, hide_index=True)
+
+    # --- Nieuw: Duiken verwijderen (op basis van huidige filter) ---
     st.divider()
-    st.subheader("Wekelijkse mail — eerstvolgende 4")
-    mail_df = df.head(4).copy()
-    rows = []
-    for _, r in mail_df.iterrows():
-        s = signups_get(r["id"])
-        yes = int((s["status"]=="yes").sum()) if not s.empty else 0
-        no  = int((s["status"]=="no").sum())  if not s.empty else 0
-        rows.append({
-            "Titel": r["titel"],
-            "Datum": pd.to_datetime(r["datum"]).strftime("%d/%m/%Y"),
-            "Tijd": r.get("tijd") or "",
-            "Locatie": r.get("locatie") or "",
-            "Teller": f"{yes} komen · {no} niet"
-        })
-    if rows:
-        view = pd.DataFrame(rows)
-        st.dataframe(view, use_container_width=True, hide_index=True)
-        out = io.BytesIO(); view.to_csv(out, index=False)
-        st.download_button("⬇️ Exporteer weekmail CSV", data=out.getvalue(),
-                           file_name="weekmail_activiteiten.csv", mime="text/csv")
+    st.subheader("Duiken verwijderen (volgens huidige filter)")
+    st.caption("Selecteer één of meerdere duiken en klik op 'Verwijder geselecteerde'. Dit kan niet ongedaan worden gemaakt.")
 
-# ──────────────────────────────────────────────────────────────────────────────
-# APP
-# ──────────────────────────────────────────────────────────────────────────────
+    # Maak schaalbare labels → id mapping
+    def _label(row):
+        dc = row.get("Duikcode") or row.get("duikcode") or ""
+        dc = dc if dc else "—"
+        return f"{row['Datum'].strftime('%d/%m/%Y')} · {row['Plaats']} · {row['Duiker']} · {dc}"
+
+    f_for_labels = f.copy()
+    # zorg dat Datum voor labels datetime.date is
+    f_for_labels["Datum"] = pd.to_datetime(f_for_labels["Datum"]).dt.date
+
+    options = []
+    id_map = {}
+    for _, r in f_for_labels.iterrows():
+        label = _label(r)
+        # Als meerdere records dezelfde weergave hebben, maak label uniek met (#id)
+        if (label in id_map) or (label in options):
+            label_unique = f"{label}  (#ID:{r['id']})"
+        else:
+            label_unique = label
+        options.append(label_unique)
+        id_map[label_unique] = r["id"]
+
+    sel_to_delete = st.multiselect("Kies duiken om te verwijderen", options, key="ovz_del_sel")
+
+    btn_col1, btn_col2 = st.columns([1, 4])
+    with btn_col1:
+        if st.button("Verwijder geselecteerde", disabled=(len(sel_to_delete) == 0 or is_viewer_effective())):
+            ids = [id_map[lbl] for lbl in sel_to_delete if id_map[lbl] is not None]
+            if not ids:
+                st.warning("Geen geldige ID's geselecteerd (controleer of de 'duiken' tabel een 'id' kolom heeft).")
+            else:
+                try:
+                    delete_duiken_by_ids(ids)
+                    st.success(f"Verwijderd: {len(ids)} duik(en).")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Verwijderen mislukt: {e}")
+    with btn_col2:
+        st.caption("Tip: filter eerst (datum/plaats/duiker/duikcode) om preciezer te selecteren.")
+
+    # Export van de huidige filter
+    st.divider()
+    st.subheader("Export (Excel) — huidige filter")
+    out = io.BytesIO()
+    with pd.ExcelWriter(out, engine="openpyxl") as w:
+        view.to_excel(w, index=False, sheet_name="Duiken")
+    st.download_button("⬇️ Download Excel", data=out.getvalue(), file_name="duiken_export.xlsx",
+                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+def page_afrekening():
+    appbar("afrekening")
+    df = fetch_duiken()
+    if df.empty:
+        st.info("Nog geen duiken geregistreerd.")
+        return
+
+    df["Datum"] = pd.to_datetime(df["datum"]).dt.date
+    df["Plaats"] = df["plaats"]
+    df["Duiker"] = df["duiker"]
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        min_d, max_d = df["Datum"].min(), df["Datum"].max()
+        rng = st.date_input("Periode", (min_d, max_d), key="afr_range", format="DD/MM/YYYY")
+    with c2:
+        bedrag = st.number_input("Bedrag per duik (€)", min_value=0.0, step=0.5, value=5.0, key="afr_bedrag")
+    with c3:
+        pf = st.selectbox("Duikplaats (optioneel)", ["Alle"] + sorted(df["Plaats"].dropna().unique().tolist()), index=0, key="afr_plaats")
+    with c4:
+        blokgrootte = st.number_input("Blokgrootte (€)", min_value=0.0, step=10.0, value=30.0, key="afr_blok")
+
+    start, end = rng if isinstance(rng, tuple) else (df["Datum"].min(), df["Datum"].max())
+    m = (df["Datum"] >= start) & (df["Datum"] <= end)
+    if pf != "Alle":
+        m &= df["Plaats"] == pf
+    s = df.loc[m].copy()
+    if s.empty:
+        st.warning("Geen duiken in de gekozen periode/filters.")
+        return
+
+    per = s.groupby("Duiker").size().reset_index(name="AantalDuiken")
+    per["Bruto"] = (per["AantalDuiken"] * bedrag).round(2)
+
+    ddf = run_db(lambda: sb.table("duikers").select("voornaam, achternaam, naam, rest_saldo").execute(),
+                 what="duikers join").data or []
+    ddf = pd.DataFrame(ddf)
+
+    vns, ans, rests = [], [], []
+    for disp in per["Duiker"].astype(str).tolist():
+        vn, an, rest = "", "", 0.0
+        if not ddf.empty:
+            row = ddf.loc[ddf["naam"] == disp]
+            if not row.empty:
+                vn = (row.iloc[0].get("voornaam") or "").strip()
+                an = (row.iloc[0].get("achternaam") or "").strip()
+                rest = float(row.iloc[0].get("rest_saldo") or 0)
+            else:
+                vn, an = _split_guess(disp)
+                row2 = ddf.loc[(ddf["voornaam"].fillna("").str.strip() == vn) &
+                               (ddf["achternaam"].fillna("").str.strip() == an)]
+                if not row2.empty:
+                    rest = float(row2.iloc[0].get("rest_saldo") or 0)
+        else:
+            vn, an = _split_guess(disp)
+        vns.append(vn)
+        ans.append(an)
+        rests.append(round(float(rest), 2))
+
+    per["Voornaam"] = vns
+    per["Achternaam"] = ans
+    per["RestOud"] = rests
+    per["Totaal"] = (per["Bruto"] + per["RestOud"]).round(2)
+
+    def calc_blokken(total: float) -> tuple[int, float, float]:
+        if blokgrootte <= 0:
+            return 0, 0.0, round(total, 2)
+        n = math.floor(total / blokgrootte)
+        uit = round(n * blokgrootte, 2)
+        rest = round(total - uit, 2)
+        return n, uit, rest
+
+    rows = []
+    for _, r in per.iterrows():
+        n, uit, rest = calc_blokken(float(r["Totaal"]))
+        rows.append({**r.to_dict(), "Blokken": n, "UitTeBetalen": uit, "RestNieuw": rest})
+    per = pd.DataFrame(rows)
+
+    per = per.sort_values(["Achternaam", "Voornaam", "Duiker"], na_position="last").reset_index(drop=True)
+
+    st.subheader("Afrekening per duiker")
+    show_cols = ["Achternaam", "Voornaam", "AantalDuiken", "Bruto", "RestOud", "Totaal", "Blokken", "UitTeBetalen", "RestNieuw"]
+    st.dataframe(per[show_cols], use_container_width=True, hide_index=True)
+
+    cX, cY, cZ = st.columns(3)
+    with cX:
+        st.metric("Totaal uit te betalen", f"€ {float(per['UitTeBetalen'].sum()):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+    with cY:
+        st.metric("Nieuw totaal restbedrag", f"€ {float(per['RestNieuw'].sum()):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+    with cZ:
+        st.caption(f"Periode: {start.strftime('%d/%m/%Y')} – {end.strftime('%d/%m/%Y')} · Blok: €{blokgrootte:.2f}")
+
+    st.divider()
+    st.subheader("Historiek vastleggen / Markeer als betaald")
+    st.caption("Selecteer duikers die je nu uitbetaalt. Restsaldo wordt automatisch bijgewerkt en bewaard voor volgende periode.")
+
+    per["select"] = False
+    for i in range(len(per)):
+        label = f"{per.at[i,'Achternaam']}, {per.at[i,'Voornaam']}"
+        per.at[i, "select"] = st.checkbox(label, key=f"sel_pay_{i}")
+
+    if st.button("Markeer geselecteerde als betaald"):
+        try:
+            sel = per[per["select"] == True]
+            if sel.empty:
+                st.warning("Geen duikers geselecteerd.")
+            else:
+                for _, r in sel.iterrows():
+                    row = {
+                        "voornaam": (r["Voornaam"] or "").strip(),
+                        "achternaam": (r["Achternaam"] or "").strip(),
+                        "periode_start": start,
+                        "periode_end": end,
+                        "bedrag_per_duik": float(bedrag),
+                        "blokgrootte": float(blokgrootte),
+                        "aantal_duiken": int(r["AantalDuiken"]),
+                        "bruto_bedrag": float(r["Bruto"]),
+                        "rest_oud": float(r["RestOud"]),
+                        "blokken": int(r["Blokken"]),
+                        "uit_te_betalen": float(r["UitTeBetalen"]),
+                        "rest_nieuw": float(r["RestNieuw"]),
+                        "betaald_op": dt.utcnow().isoformat()
+                    }
+                    insert_afrekening(row)
+                    if row["voornaam"] or row["achternaam"]:
+                        set_rest_saldo(row["voornaam"], row["achternaam"], row["rest_nieuw"])
+                st.success(f"Afrekening geregistreerd voor {len(sel)} duiker(s).")
+                st.rerun()
+        except Exception as e:
+            st.error(f"Registratie mislukt: {e}")
+
+    st.divider()
+    st.subheader("Export (Excel)")
+    out = io.BytesIO()
+    with pd.ExcelWriter(out, engine="openpyxl") as w:
+        per[show_cols].to_excel(w, index=False, sheet_name="Afrekening")
+        s.sort_values(["Datum", "Plaats", "duikcode", "Duiker"]).to_excel(w, index=False, sheet_name="Detail")
+    st.download_button("⬇️ Download Afrekening (Excel)", data=out.getvalue(), file_name="Afrekening.xlsx",
+                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+def page_beheer():
+    if is_viewer_effective() or current_role() != "admin":
+        st.error("Toegang geweigerd — alleen admins.")
+        return
+
+    appbar("beheer")
+    tabs = st.tabs(["Gebruikers", "Duikers", "Duikplaatsen", "Back-up & export"])
+
+    # ───────────── TAB 0: Gebruikers ─────────────
+    with tabs[0]:
+        res = run_db(
+            lambda: sb.table("users")
+                      .select("username, role, failed_attempts, locked_until")
+                      .order("username").execute(),
+            what="users select (beheer)"
+        )
+        users_df = pd.DataFrame(res.data or [])
+        st.dataframe(users_df, use_container_width=True, hide_index=True)
+
+        st.subheader("Rol van gebruiker wijzigen")
+        all_usernames = users_df["username"].astype(str).tolist() if not users_df.empty else []
+        sel_role_user = st.selectbox("Kies gebruiker", all_usernames, key="chg_role_user")
+        new_role = st.selectbox("Nieuwe rol", ["viewer", "user", "admin"], index=1, key="chg_role_new")
+        if st.button("Wijzig rol"):
+            if not sel_role_user:
+                st.warning("Kies eerst een gebruiker.")
+            else:
+                try:
+                    current = get_user(sel_role_user)
+                    cur_role = normalize_role(current.get("role") if current else "")
+                    if cur_role == "admin" and new_role != "admin":
+                        admins = set(list_admin_usernames())
+                        admins.discard(sel_role_user)
+                        if len(admins) == 0:
+                            st.error("Er moet minstens één andere admin overblijven.")
+                        else:
+                            update_user_role(sel_role_user, new_role)
+                            st.success(f"Rol gewijzigd naar {new_role}.")
+                            st.rerun()
+                    else:
+                        update_user_role(sel_role_user, new_role)
+                        st.success(f"Rol gewijzigd naar {new_role}.")
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Rol wijzigen mislukt: {e}")
+
+        st.divider()
+        st.subheader("Gebruikers verwijderen")
+        protect = {"admin", st.session_state.get("username", "")}
+        sel_del_users = st.multiselect(
+            "Kies gebruikers om te verwijderen",
+            [u for u in all_usernames if u not in protect]
+        )
+        if st.button("Verwijder geselecteerde gebruikers", disabled=(len(sel_del_users) == 0)):
+            remaining_admins = set(list_admin_usernames()) - set(sel_del_users)
+            if len(remaining_admins) == 0:
+                st.error("Minstens één admin moet overblijven.")
+            else:
+                ok, n, err = delete_users(sel_del_users)
+                if ok:
+                    st.success(f"Verwijderd: {n} gebruiker(s).")
+                    st.rerun()
+                else:
+                    st.error(f"Verwijderen mislukt: {err}")
+
+        st.divider()
+        st.subheader("Nieuwe gebruiker")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            u = st.text_input("Username")
+        with c2:
+            p = st.text_input("Wachtwoord")
+        with c3:
+            r = st.selectbox("Rol", ["viewer", "user", "admin"], index=0)
+        if st.button("Gebruiker toevoegen"):
+            if u and p and (get_user(u) is None):
+                hashed = bcrypt.hashpw(p.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+                try:
+                    run_db(
+                        lambda: sb.table("users").insert({
+                            "username": u,
+                            "password_hash": hashed,
+                            "role": normalize_role(r),
+                            "failed_attempts": 0,
+                            "locked_until": None
+                        }).execute(),
+                        what="users insert (beheer)"
+                    )
+                    st.success(f"Gebruiker '{u}' toegevoegd ({r}).")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Toevoegen mislukt: {e}")
+            else:
+                st.warning("Ongeldig of reeds bestaand.")
+
+        st.divider()
+        st.subheader("Wachtwoord resetten / Deblokkeren")
+        res = run_db(lambda: sb.table("users").select("username").order("username").execute(),
+                     what="users select (pw)")
+        all_users_pw = [row["username"] for row in (res.data or [])]
+        sel_user = st.selectbox("Kies gebruiker", all_users_pw)
+        new_pw = st.text_input("Nieuw wachtwoord")
+        colr1, colr2 = st.columns(2)
+        with colr1:
+            if st.button("Reset wachtwoord"):
+                if sel_user and new_pw:
+                    try:
+                        set_password(sel_user, new_pw)
+                        st.success(f"Wachtwoord van '{sel_user}' is gewijzigd.")
+                    except Exception as e:
+                        st.error(f"Reset mislukt: {e}")
+                else:
+                    st.warning("Selecteer gebruiker en geef nieuw wachtwoord in.")
+        with colr2:
+            if st.button("Deblokkeer account"):
+                try:
+                    clear_lock(sel_user)
+                    st.success(f"Account van '{sel_user}' is gedeblokkeerd.")
+                except Exception as e:
+                    st.error(f"Deblokkeren mislukt: {e}")
+
+    # ───────────── TAB 1: Duikers ─────────────
+    with tabs[1]:
+        res = run_db(
+            lambda: sb.table("duikers").select("voornaam, achternaam, naam, rest_saldo").execute(),
+            what="duikers select (beheer)"
+        )
+        ddf = pd.DataFrame(res.data or [])
+
+        if not ddf.empty:
+            if {"achternaam", "voornaam"}.issubset(ddf.columns):
+                ddf["_an"] = ddf["achternaam"].fillna("").str.lower()
+                ddf["_vn"] = ddf["voornaam"].fillna("").str.lower()
+                ddf = ddf.sort_values(["_an", "_vn"]).drop(columns=["_an", "_vn"])
+            elif "naam" in ddf.columns:
+                tmp = ddf["naam"].fillna("").map(_split_guess)
+                ddf["_vn"] = tmp.map(lambda t: t[0])
+                ddf["_an"] = tmp.map(lambda t: t[1])
+                ddf = ddf.sort_values(["_an", "_vn"]).drop(columns=["_an", "_vn"])
+
+            view = ddf.rename(columns={
+                "voornaam": "Voornaam",
+                "achternaam": "Achternaam",
+                "rest_saldo": "Rest (start)"
+            })
+        else:
+            view = pd.DataFrame(columns=["Voornaam", "Achternaam", "Rest (start)"])
+
+        st.subheader("Duikers (overzicht)")
+        st.dataframe(view, use_container_width=True, hide_index=True)
+
+        st.subheader("Duikers verwijderen")
+        sel_duikers = st.multiselect(
+            "Kies duikers om te verwijderen",
+            view["Achternaam"] + ", " + view["Voornaam"] if not view.empty else []
+        )
+        if st.button("Verwijder geselecteerde duikers", disabled=(len(sel_duikers) == 0)):
+            ok, n, err = delete_duikers(sel_duikers)
+            if ok:
+                st.success(f"Verwijderd: {n} duiker(s).")
+                st.rerun()
+            else:
+                st.error(f"Verwijderen mislukt: {err}")
+
+        st.divider()
+        st.subheader("Nieuwe duiker")
+        c1, c2, c3 = st.columns([1, 1, 1])
+        with c1:
+            vn = st.text_input("Voornaam")
+        with c2:
+            an = st.text_input("Achternaam")
+        with c3:
+            rs = st.number_input("Start rest (€)", value=0.0, step=1.0)
+        if st.button("Toevoegen aan duikers"):
+            if (vn or an):
+                try:
+                    run_db(
+                        lambda: sb.table("duikers").insert({
+                            "voornaam": vn,
+                            "achternaam": an,
+                            "naam": f"{vn} {an}".strip(),
+                            "rest_saldo": rs
+                        }).execute(),
+                        what="duikers insert (beheer)"
+                    )
+                    st.success(f"Duiker '{an}, {vn}' toegevoegd.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Toevoegen mislukt: {e}")
+            else:
+                st.warning("Geef minstens een voornaam of achternaam in.")
+
+    # ───────────── TAB 2: Duikplaatsen ─────────────
+    with tabs[2]:
+        plaatsen = list_plaatsen()
+        st.subheader("Duikplaatsen (overzicht)")
+        st.dataframe(pd.DataFrame({"Plaats": plaatsen}), use_container_width=True, hide_index=True)
+
+        st.divider()
+        st.subheader("Duikplaatsen verwijderen")
+        sel_plaatsen = st.multiselect("Kies duikplaatsen om te verwijderen", plaatsen, key="beheer_del_plaatsen")
+        if st.button("Verwijder geselecteerde duikplaatsen", disabled=(len(sel_plaatsen) == 0), key="btn_del_plaatsen"):
+            ok, n, err = delete_plaatsen(sel_plaatsen)
+            if ok:
+                st.success(f"Verwijderd: {n} duikplaats(en).")
+                st.rerun()
+            else:
+                st.error(f"Verwijderen mislukt: {err}")
+
+        st.divider()
+        st.subheader("Nieuwe duikplaats")
+        np = st.text_input("Nieuwe duikplaats", key="beheer_new_plaats")
+        if st.button("Toevoegen aan duikplaatsen", key="btn_add_plaats"):
+            if np and (np not in plaatsen):
+                try:
+                    add_plaats(np)
+                    st.success(f"Duikplaats '{np}' toegevoegd.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Toevoegen mislukt: {e}")
+            else:
+                st.warning("Leeg of al bestaand.")
+
+    # ───────────── TAB 3: Back-up & export ─────────────
+    with tabs[3]:
+        st.info("Alle data wordt automatisch opgeslagen in Supabase. "
+                "Hier kun je een back-up (Excel) downloaden van alle tabellen.")
+        if st.button("Maak back-up (Excel)"):
+            out = io.BytesIO()
+            users = run_db(lambda: sb.table("users").select("*").execute(),
+                           what="users select (backup)")
+            duikers = run_db(lambda: sb.table("duikers").select("*").execute(),
+                             what="duikers select (backup)")
+            plaatsen_df = run_db(lambda: sb.table("duikplaatsen").select("*").execute(),
+                                 what="duikplaatsen select (backup)")
+            duiken = run_db(lambda: sb.table("duiken").select("*").execute(),
+                            what="duiken select (backup)")
+            df_users = pd.DataFrame(users.data or [])
+            df_duikers = pd.DataFrame(duikers.data or [])
+            df_plaatsen = pd.DataFrame(plaatsen_df.data or [])
+            df_duiken = pd.DataFrame(duiken.data or [])
+            stamp = dt.utcnow().strftime("%Y%m%d_%H%M%S")
+            with pd.ExcelWriter(out, engine="openpyxl") as w:
+                df_users.to_excel(w, index=False, sheet_name="users")
+                df_duikers.to_excel(w, index=False, sheet_name="duikers")
+                df_plaatsen.to_excel(w, index=False, sheet_name="duikplaatsen")
+                df_duiken.to_excel(w, index=False, sheet_name="duiken")
+            st.download_button(
+                "⬇️ Download back-up",
+                data=out.getvalue(),
+                file_name=f"anww_backup_{stamp}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+# ──────────────────────────────
+# Main
+# ──────────────────────────────
 def main():
-    st.sidebar.title("ANWW")
-    if "username" not in st.session_state:
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = False
+
+    if not st.session_state.logged_in:
         login_page()
         return
 
-    st.sidebar.markdown(f"**Ingelogd als:** {current_username()} ({current_role()})")
-    if st.sidebar.button("Uitloggen"):
-        st.session_state.clear(); st.rerun()
+    try:
+        urow = get_user(st.session_state.get("username", ""))
+        if urow:
+            st.session_state.role = normalize_role(urow.get("role"))
+    except Exception:
+        pass
 
-    tabs = st.tabs(["Kalender"])
-    with tabs[0]:
-        page_activiteiten()
+    role = current_role()
+    st.markdown(
+        f"<div class='badge'>Ingelogd als: <b>{st.session_state.get('username','?')}</b> · Rol: <b>{role}</b>"
+        + (" · READ-ONLY (noodslot)" if FORCE_READONLY else "")
+        + f" · Build: {APP_BUILD}</div>",
+        unsafe_allow_html=True
+    )
+
+    if role == "admin" and not FORCE_READONLY:
+        tabs = st.tabs(["Duiken invoeren", "Overzicht", "Afrekening", "Beheer"])
+        with tabs[0]:
+            page_duiken()
+        with tabs[1]:
+            page_overzicht()
+        with tabs[2]:
+            page_afrekening()
+        with tabs[3]:
+            page_beheer()
+    elif role == "user" and not FORCE_READONLY:
+        tabs = st.tabs(["Duiken invoeren", "Overzicht", "Afrekening"])
+        with tabs[0]:
+            page_duiken()
+        with tabs[1]:
+            page_overzicht()
+        with tabs[2]:
+            page_afrekening()
+    else:
+        tabs = st.tabs(["Overzicht", "Afrekening"])
+        with tabs[0]:
+            page_overzicht()
+        with tabs[1]:
+            page_afrekening()
 
 if __name__ == "__main__":
     main()
-
