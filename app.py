@@ -25,7 +25,7 @@ st.set_page_config(page_title="ANWW Duikapp", layout="wide")
 APP_BUILD = "v2025-10-03-LOCAL-USER-LOGIN"
 
 def inject_css():
-    import os, pathlib, tomllib
+import os, pathlib, tomllib
 
 st.subheader("🎛 Theme / CSS diagnose (tijdelijk)")
 st.write("cwd =", os.getcwd())
