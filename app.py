@@ -633,7 +633,6 @@ def page_activiteiten():
 
     # Toon activiteiten (zelfde volgorde: vroeg -> laat)
     for _, row in df.iterrows():
-
     for _, row in df.sort_values(["datum", "tijd"], na_position="last").iterrows():
         s = signups_get(row["id"])
 
