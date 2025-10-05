@@ -4,10 +4,10 @@
 # ================================
 
 [theme]
-# Basis Streamlit kleuren
-primaryColor = "#728DCC"              # primaire knopkleur
-backgroundColor = "#8DAEBA"           # algemene achtergrond
-secondaryBackgroundColor = "#A38B16"  # panelen / expanders / tabs
-textColor = "#11064D"                 # hoofdtekst
+primaryColor = "#728DCC"
+backgroundColor = "#8DAEBA"
+secondaryBackgroundColor = "#A38B16"
+textColor = "#11064D"
 font = "sans serif"
+
 
