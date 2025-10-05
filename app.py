@@ -25,104 +25,41 @@ st.set_page_config(page_title="ANWW Duikapp", layout="wide")
 APP_BUILD = "v2025-10-03-LOCAL-USER-LOGIN"
 
 def inject_css():
-import os, pathlib, tomllib
-
-st.subheader("🎛 Theme / CSS diagnose (tijdelijk)")
-st.write("cwd =", os.getcwd())
-
-cfg_path = pathlib.Path(".streamlit/config.toml")
-st.write("config.toml bestaat:", cfg_path.exists())
-if cfg_path.exists():
-    try:
-        txt = cfg_path.read_text(encoding="utf-8")
-        st.code(txt, language="toml")
-        data = tomllib.loads(txt)
-        st.write("Gelezen theme uit file:", data.get("theme", {}))
-    except Exception as e:
-        st.error(f"Kon config.toml niet lezen: {e}")
-
-st.write("Streamlit theme options:",
-         st.get_option("theme.primaryColor"),
-         st.get_option("theme.backgroundColor"),
-         st.get_option("theme.secondaryBackgroundColor"),
-         st.get_option("theme.textColor"))
-
     st.markdown("""
     <style>
-      /* ====== Kleuren uit jouw palet ====== */
       :root {
-        --background: #8DAEBA;
-        --secondary: #A38B16;
+        --bg: #8DAEBA;
+        --panel: #A38B16;
         --text: #11064D;
         --primary: #728DCC;
         --border: #2a355a;
-        --success: #3CA133;
-        --warning: #f59e0b;
-        --error: #ef4444;
       }
 
-      /* ====== Achtergrond en tekst ====== */
-      .stApp, [data-testid="stAppViewContainer"], section.main, div.block-container {
-        background-color: var(--background) !important;
+      .stApp, [data-testid="stAppViewContainer"], .main, div.block-container {
+        background-color: var(--bg) !important;
         color: var(--text) !important;
       }
 
-      /* ====== Sidebar ====== */
-      section[data-testid="stSidebar"], [data-testid="stSidebarContent"] {
-        background-color: var(--secondary) !important;
+      section[data-testid="stSidebar"] > div, [data-testid="stSidebarContent"] {
+        background-color: var(--panel) !important;
       }
 
-      /* ====== Tabs / Expanders ====== */
-      .stTabs [data-baseweb="tab"] {
-        background: var(--secondary) !important;
-        color: #fff !important;
-        border-radius: 5px 5px 0 0;
-        font-weight: 600;
-      }
-      .stTabs [aria-selected="true"] {
-        background: var(--primary) !important;
-        color: white !important;
-      }
-
-      .stExpander {
+      .stExpander, .stTabs [data-baseweb="tab-list"] {
         border: 1px solid var(--border) !important;
-        background: #ffffff80 !important;
+        background: rgba(255,255,255,.65) !important;
       }
 
-      /* ====== Knoppen ====== */
       .stButton > button, .stDownloadButton > button {
         background-color: var(--primary) !important;
         color: #fff !important;
         border: 2px solid var(--border) !important;
         border-radius: 10px !important;
-        padding: 0.4em 1em !important;
+        padding: .45em 1.1em !important;
         font-weight: 600 !important;
-        transition: all 0.15s ease-in-out !important;
       }
       .stButton > button:hover, .stDownloadButton > button:hover {
-        filter: brightness(1.1) !important;
-        transform: translateY(-1px);
-      }
-
-      /* Varianten voor HTML-knoppen */
-      .stButton.success > button { background: var(--success) !important; border-color: var(--success) !important; }
-      .stButton.warning > button { background: var(--warning) !important; color:#000 !important; border-color: var(--warning) !important; }
-      .stButton.error   > button { background: var(--error)   !important; border-color: var(--error)   !important; }
-
-      /* ====== Tabellen ====== */
-      [data-testid="stDataFrame"] thead tr th {
-        background: #ffffff88 !important;
-        color: var(--text) !important;
-      }
-
-      /* ====== Kleine accenten ====== */
-      hr, .stDivider {
-        border-top: 2px solid var(--border) !important;
-      }
-
-      /* ====== Titels ====== */
-      h1, h2, h3, h4, h5 {
-        color: var(--text) !important;
+        filter: brightness(1.08) !important;
+        transform: translateY(-1px) !important;
       }
     </style>
     """, unsafe_allow_html=True)
