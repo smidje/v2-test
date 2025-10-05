@@ -80,6 +80,11 @@ def inject_css():
       }
     </style>
     """, unsafe_allow_html=True)
+    st.button("Primaire knop test")
+st.markdown('<div class="stButton success"><button>Succes-knop</button></div>', unsafe_allow_html=True)
+st.markdown('<div class="stButton warning"><button>Waarschuwing-knop</button></div>', unsafe_allow_html=True)
+st.markdown('<div class="stButton error"><button>Verwijderen-knop</button></div>', unsafe_allow_html=True)
+
 
 
 
