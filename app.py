@@ -28,72 +28,59 @@ def inject_css():
     st.markdown("""
     <style>
       :root{
-        --background: #8DAEBA;           /* jouw backgroundColor */
-        --surface: #99883F;
-        --card: #A38B16;                 /* jouw secondaryBackgroundColor */
+        --background: #8DAEBA;   /* jouw achtergrond */
+        --card: #A38B16;         /* panel/kaarten */
         --border: #2a355a;
-        --text: #11064D;                 /* jouw textColor */
+        --text: #11064D;         /* tekst */
         --muted: #9fb0d9;
-        --primary: #728DCC;              /* jouw primaryColor */
-        --primary-contrast: #453A06;
-        --accent: #22d3ee;
+        --primary: #728DCC;      /* knopkleur */
         --success: #3CA133;
         --warning: #f59e0b;
         --error: #ef4444;
       }
 
-      /* Achtergrond en tekst (zet je basis look meteen goed) */
-      .stApp, [data-testid="stAppViewContainer"] {
-        background: var(--background) !important;
+      /* ===== Pagina-achtergrond & tekst ===== */
+      html, body, .stApp, [data-testid="stAppViewContainer"]{
+        background-color: var(--background) !important;
         color: var(--text) !important;
       }
 
-      /* Sidebar/panel randjes */
-      [data-testid="stSidebar"], .stExpander, .stTabs [data-baseweb="tab-list"]{
-        border-color: var(--border) !important;
+      /* ===== Sidebar / panel-tint ===== */
+      section[data-testid="stSidebar"] > div {
+        background-color: var(--card) !important;
+      }
+      .stExpander, .stTabs [data-baseweb="tab-list"]{
+        border: 1px solid var(--border) !important;
       }
 
-      /* Knoppen – kleur komt normaal uit theme.primaryColor; we geven extra styling mee */
+      /* ===== Knoppen (alle varianten) ===== */
       .stButton > button, .stDownloadButton > button {
-        border-radius: 10px;
-        border: 2px solid var(--border);
-        padding: 0.5em 1.2em;
-        font-weight: 600;
-        transition: all 0.2s ease;
+        background: var(--primary) !important;
+        color: #fff !important;
+        border: 2px solid var(--border) !important;
+        border-radius: 10px !important;
+        padding: 0.5em 1.2em !important;
+        font-weight: 600 !important;
+        transition: all .15s ease !important;
       }
       .stButton > button:hover, .stDownloadButton > button:hover {
-        filter: brightness(1.07);
-        transform: translateY(-1px);
+        filter: brightness(1.08) !important;
+        transform: translateY(-1px) !important;
       }
 
-      /* Variant-knoppen (te gebruiken via HTML wrappers indien gewenst) */
-      .stButton.success > button { background-color: var(--success) !important; color: #fff !important; border-color: var(--success) !important; }
-      .stButton.warning > button { background-color: var(--warning) !important; color: #000 !important; border-color: var(--warning) !important; }
-      .stButton.error   > button { background-color: var(--error)   !important; color: #fff !important; border-color: var(--error)   !important; }
+      /* Optionele kleurvarianten (via wrapper class) */
+      .stButton.success > button { background: var(--success) !important; border-color: var(--success) !important; }
+      .stButton.warning > button { background: var(--warning) !important; color:#000 !important; border-color: var(--warning) !important; }
+      .stButton.error   > button { background: var(--error)   !important; border-color: var(--error)   !important; }
 
-      /* Datatabellen header */
+      /* ===== Tabellen (header) ===== */
       [data-testid="stDataFrame"] thead tr th {
         background: var(--muted) !important;
         color: #111 !important;
       }
-
-      /* Badges */
-      .badge { 
-        display: inline-block;
-        border-radius: 999px;
-        padding: 4px 10px;
-        font-weight: 500;
-        font-size: 0.85em;
-        background: #ffffff44;
-        border: 1px solid var(--border);
-        color: var(--text);
-        margin: 2px;
-      }
-      .badge.success{ background: var(--success); color: #fff; border-color: var(--success); }
-      .badge.warn{    background: var(--warning); color: #000; border-color: var(--warning); }
-      .badge.error{   background: var(--error);   color: #fff; border-color: var(--error); }
     </style>
     """, unsafe_allow_html=True)
+
 
 
 
