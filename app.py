@@ -94,7 +94,7 @@ def inject_css():
       .badge.error{   background: var(--error);   color: #fff; border-color: var(--error); }
     </style>
     """, unsafe_allow_html=True)
-
+    inject_css()
 
 
 def is_readonly() -> bool:
