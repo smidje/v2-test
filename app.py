@@ -230,7 +230,9 @@ def current_email() -> str:
 # Tabellen & helpers
 # ──────────────────────────────────────────────────────────────────────────────
 # Gebruik exact de labels van je database-check
-BREVET_CHOICES = ['k1', '1ster', '2ster', '3ster', '4ster', 'as-Inst', '1*Ins', '2*Ins', '3*Ins']
+# Gebruik jouw labels (mooi voor weergave); DB-check is case-insensitive.
+BREVET_CHOICES = ['(geen)','k1','1ster','2ster','3ster','4ster','as-Inst','1*Ins','2*Ins','3*Ins']
+
 ROLE_CHOICES = ['admin','user','member','viewer']
 
 def leden_upsert(payload: dict):
@@ -523,6 +525,79 @@ def page_ledenbeheer():
         pw1 = st.text_input("Initieel wachtwoord (alleen bij 1e keer toevoegen)", type="password")
         pw2 = st.text_input("Herhaal wachtwoord", type="password")
         submitted = st.form_submit_button("Bewaar lid", type="primary")
+st.subheader("Leden bewerken")
+
+df = leden_df()
+if df.empty:
+    st.info("Geen leden gevonden.")
+else:
+    # Snelle zoek/filter op login of e-mail
+    q = st.text_input("Zoek (login of e-mail)", placeholder="bv. piet of @gmail.com")
+    f = df.copy()
+    if q:
+        ql = q.lower()
+        cols = [c for c in f.columns if c in ("login","email","voornaam","naam")]
+        if cols:
+            mask = False
+            for c in cols:
+                mask = mask | f[c].astype(str).str.lower().str.contains(ql, na=False)
+            f = f[mask]
+
+    # Keuzelijst op basis van login (valt terug op id als login ontbreekt)
+    options = []
+    id_map = {}
+    for _, r in f.iterrows():
+        label = (r.get("login") or "(geen login)") + (" · " + (r.get("email") or "")) 
+        options.append(label)
+        id_map[label] = r.get("id") or r.get("login")  # minstens iets dat uniek is
+
+    sel = st.selectbox("Kies een lid om te bewerken", ["— kies —"] + options, index=0)
+    if sel != "— kies —":
+        lid_id = id_map[sel]
+        row = df.loc[df["id"] == lid_id].iloc[0] if "id" in df.columns else f.loc[f["login"] == lid_id].iloc[0]
+
+        with st.form("edit_lid"):
+            c1, c2 = st.columns(2)
+
+            # Toon alleen velden die bestaan in jouw tabel
+            login = st.text_input("Login", value=row.get("login",""))
+            email = st.text_input("E-mail", value=row.get("email",""))
+
+            # Voornaam/Naam alleen tonen als kolommen bestaan
+            voornaam = st.text_input("Voornaam", value=row.get("voornaam","")) if "voornaam" in df.columns else None
+            naam     = st.text_input("Naam",     value=row.get("naam",""))     if "naam"     in df.columns else None
+
+            # Brevet
+            curr_brevet = row.get("duikbrevet")
+            brevet_idx = 0
+            if curr_brevet:
+                # match case-insensitive op jouw weergavelijst
+                low_map = {b.lower(): i for i, b in enumerate(BREVET_CHOICES)}
+                brevet_idx = low_map.get(curr_brevet.lower(), 0)
+            brevet = st.selectbox("Duikbrevet", BREVET_CHOICES, index=brevet_idx)
+
+            # Rol alleen tonen als kolom bestaat
+            rol = st.selectbox("Rol", ["viewer","member","user","admin"],
+                               index=["viewer","member","user","admin"].index(row.get("rol","viewer"))) if "rol" in df.columns else None
+
+            # Opslaan
+            save = st.form_submit_button("Opslaan", type="primary")
+            if save:
+                try:
+                    payload = {
+                        "login": login.strip() or None,
+                        "email": (email.strip().lower() or None) if email else None,
+                        "duikbrevet": None if brevet == "(geen)" else brevet,
+                    }
+                    if voornaam is not None: payload["voornaam"] = (voornaam.strip() or None)
+                    if naam     is not None: payload["naam"]     = (naam.strip() or None)
+                    if rol      is not None: payload["rol"]      = rol
+
+                    lid_update(lid_id, payload)
+                    st.success("Lid bijgewerkt.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Opslaan mislukt: {e}")
 
     if submitted:
         if not username:
