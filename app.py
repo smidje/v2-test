@@ -25,6 +25,28 @@ st.set_page_config(page_title="ANWW Duikapp", layout="wide")
 APP_BUILD = "v2025-10-03-LOCAL-USER-LOGIN"
 
 def inject_css():
+    import os, pathlib, tomllib
+
+st.subheader("🎛 Theme / CSS diagnose (tijdelijk)")
+st.write("cwd =", os.getcwd())
+
+cfg_path = pathlib.Path(".streamlit/config.toml")
+st.write("config.toml bestaat:", cfg_path.exists())
+if cfg_path.exists():
+    try:
+        txt = cfg_path.read_text(encoding="utf-8")
+        st.code(txt, language="toml")
+        data = tomllib.loads(txt)
+        st.write("Gelezen theme uit file:", data.get("theme", {}))
+    except Exception as e:
+        st.error(f"Kon config.toml niet lezen: {e}")
+
+st.write("Streamlit theme options:",
+         st.get_option("theme.primaryColor"),
+         st.get_option("theme.backgroundColor"),
+         st.get_option("theme.secondaryBackgroundColor"),
+         st.get_option("theme.textColor"))
+
     st.markdown("""
     <style>
       /* ====== Kleuren uit jouw palet ====== */
