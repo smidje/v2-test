@@ -1175,5 +1175,7 @@ def main():
         with tabs[1]: page_profiel()
 
 if __name__ == "__main__":
+    st.markdown("<div style='color:red;'>CSS test geladen</div>", unsafe_allow_html=True)
+
     main()
 
