@@ -597,7 +597,7 @@ def page_activiteiten():
                         st.error(f"Mislukt: {e}")
 
     # ──────────────────────────────────────────────────────────────────────────
-    # Overzicht komende activiteiten (gesorteerd) + tellingen
+    # Komende activiteiten — direct als lijst (vroeg -> laat) met tellers
     # ──────────────────────────────────────────────────────────────────────────
     df = activiteiten_list_df(upcoming=True)
     if df.empty:
@@ -607,29 +607,138 @@ def page_activiteiten():
     # sorteer van vroeg -> laat
     df = df.sort_values(["datum", "tijd"], na_position="last").reset_index(drop=True)
 
-    # Tellingen opbouwen
-    summary_rows = []
-    for _, r in df.iterrows():
-        s = signups_get(r["id"])
-        yes = int((s["status"] == "yes").sum()) if not s.empty else 0
-        no  = int((s["status"] == "no").sum()) if not s.empty else 0
-        summary_rows.append({
-            "Datum": pd.to_datetime(r["datum"]).strftime("%d/%m/%Y"),
-            "Tijd": r.get("tijd") or "",
-            "Titel": r.get("titel") or "",
-            "Locatie": r.get("locatie") or "",
-            "Komen": yes,
-            "Niet komen": no
-        })
-
-    st.subheader("Overzicht (tellingen per activiteit)")
-    if summary_rows:
-        st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
-
     # Identiteit voor inschrijven
     my_username = current_username()
     my_lid = leden_get_by_username(my_username)
     my_lid_id = (my_lid or {}).get("id")
+
+    # Lijstweergave: één rij per activiteit
+    for _, row in df.iterrows():
+        # haal inschrijvingen
+        s = signups_get(row["id"])
+        yes = int((s["status"] == "yes").sum()) if not s.empty else 0
+        no  = int((s["status"] == "no").sum())  if not s.empty else 0
+
+        # mijn status
+        myrow = None
+        if my_username:
+            tmp = s.loc[s["username"] == my_username]
+            if not tmp.empty:
+                myrow = tmp
+        if (myrow is None or myrow.empty) and my_lid_id:
+            tmp = s.loc[s["lid_id"] == my_lid_id]
+            if not tmp.empty:
+                myrow = tmp
+        my_status = (myrow.iloc[0]["status"] if (myrow is not None and not myrow.empty) else None)
+        badge = "🟢" if my_status == "yes" else ("🔴" if my_status == "no" else "⚪")
+
+        # rijlayout
+        c1, c2, c3, c4 = st.columns([5, 2, 2, 3])
+        datum_str = pd.to_datetime(row["datum"]).strftime("%d/%m/%Y")
+        tijd_str = f" · {row['tijd']}" if row.get("tijd") else ""
+        titel = f"{datum_str}{tijd_str} — {row['titel']}"
+        with c1:
+            st.markdown(f"**{titel}**  {badge}")
+            if row.get("locatie"):
+                st.caption(f"📍 {row['locatie']}")
+        with c2:
+            st.metric("Komen", yes)
+        with c3:
+            st.metric("Niet komen", no)
+        with c4:
+            exp = st.expander("Inschrijven / details", expanded=False)
+
+        # inhoud expander: details + inschrijven + print/CSV
+        with exp:
+            if row.get("omschrijving"):
+                st.write(row["omschrijving"])
+
+            # Lijsten op volgorde van inschrijving
+            coming = s.loc[s["status"] == "yes"].sort_values("signup_ts")
+            notcoming = s.loc[s["status"] == "no"].sort_values("signup_ts")
+
+            colA, colB = st.columns(2)
+            with colA:
+                st.markdown("**Komen (op volgorde van inschrijving):**")
+                if coming.empty:
+                    st.caption("Nog niemand.")
+                else:
+                    for _, ss in coming.iterrows():
+                        meal = f" · eet: {ss['meal_choice']}" if ss.get("eating") else ""
+                        st.write(f"- {ss.get('username') or 'lid'}{meal}")
+            with colB:
+                st.markdown("**Niet komen:**")
+                if notcoming.empty:
+                    st.caption("Nog niemand.")
+                else:
+                    for _, ss in notcoming.iterrows():
+                        st.write(f"- {ss.get('username') or 'lid'}")
+
+            # Inschrijven — admin/user/member
+            if current_role() in {"admin", "user", "member"} and not is_readonly():
+                st.divider()
+                st.markdown("**Mijn inschrijving**")
+                prev_eating, prev_meal = False, None
+                if myrow is not None and not myrow.empty:
+                    if pd.notna(myrow.iloc[0].get("eating")):
+                        prev_eating = bool(myrow.iloc[0].get("eating"))
+                    pm = myrow.iloc[0].get("meal_choice")
+                    prev_meal = pm if isinstance(pm, str) and pm.strip() else None
+
+                init_index = 0 if my_status in (None, "yes") else 1
+                status = st.radio("Status", ["Ik kom", "Ik kom niet"], horizontal=True, index=init_index, key=f"st_{row['id']}")
+                eating = None
+                meal_choice = None
+                meal_opts = row.get("meal_options") or []
+                if status == "Ik kom":
+                    eating = st.checkbox("Ik eet mee", value=prev_eating, key=f"eat_{row['id']}")
+                    if eating and meal_opts:
+                        default_ix = 0
+                        if prev_meal and prev_meal in meal_opts:
+                            default_ix = meal_opts.index(prev_meal) + 1
+                        mc = st.selectbox("Kies je maaltijd", ["— kies —"] + meal_opts, index=default_ix, key=f"meal_{row['id']}")
+                        meal_choice = None if mc == "— kies —" else mc
+
+                if st.button("Bewaar mijn keuze", key=f"save_{row['id']}", type="primary"):
+                    try:
+                        signup_upsert(
+                            activiteit_id=row["id"],
+                            username=my_username or None,
+                            lid_id=my_lid_id or None,
+                            status=("yes" if status == "Ik kom" else "no"),
+                            eating=eating,
+                            meal_choice=meal_choice
+                        )
+                        st.success("Inschrijving bijgewerkt.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Opslaan mislukt: {e}")
+
+            # Print/Export per activiteit
+            st.markdown("---")
+            st.markdown("**Afdrukvoorbeeld / export van inschrijvingen**")
+            print_df = s[["username", "status", "eating", "meal_choice", "signup_ts"]].copy()
+            print_df = print_df.rename(columns={
+                "username": "Gebruiker",
+                "status": "Status",
+                "eating": "Eet mee",
+                "meal_choice": "Maaltijd",
+                "signup_ts": "Ingeschreven op"
+            })
+            if not print_df.empty:
+                print_df["Ingeschreven op"] = pd.to_datetime(print_df["Ingeschreven op"]).dt.strftime("%d/%m/%Y %H:%M")
+            st.dataframe(print_df, use_container_width=True, hide_index=True)
+            buf = io.BytesIO()
+            print_df.to_csv(buf, index=False)
+            st.download_button(
+                "⬇️ Download CSV van inschrijvingen",
+                data=buf.getvalue(),
+                file_name=f"inschrijvingen_{row['titel']}_{row['datum']}.csv",
+                mime="text/csv",
+                key=f"csv_{row['id']}"
+            )
+            st.caption("Tip: gebruik je browser-print (Ctrl/Cmd + P) op deze pagina voor papier/PDF.")
+
 
     # ──────────────────────────────────────────────────────────────────────────
     # Detail per activiteit (zelfde volgorde: vroeg -> laat)
