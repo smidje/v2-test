@@ -1,8 +1,7 @@
-# app.py — ANWW Duikapp (username + wachtwoord) • Build v2025-10-05
+# app.py — ANWW Duikapp (username + wachtwoord) • Build v2025-10-05 • LOGO VERWIJDERD
 # Functies:
 # - Login met username/password + rol (admin/user/member/viewer)
-# - Login-logo (beheerder kan uploaden; bewaard in Storage + app_settings)
-# - Activiteiten (sort vroeg→laat), inschrijven met opmerking, optioneel Volw/Kind, maaltijdkeuze (max 3)
+# - Activiteiten (sort: vroeg→laat), inschrijven met opmerking, optioneel Volw/Kind, maaltijdkeuze (max 3)
 # - Locatie uit duikplaatsen (admin kan loc toevoegen)
 # - CSV export per activiteit, verwijderen (admin)
 # - Weekmail preview/export (neemt V/K mee indien enable_counts)
@@ -12,7 +11,7 @@ import pandas as pd
 import datetime
 from datetime import datetime as dt
 import io
-import hmac, hashlib
+import hashlib
 from supabase import create_client, Client
 from postgrest.exceptions import APIError
 
@@ -20,7 +19,7 @@ from postgrest.exceptions import APIError
 # UI CONFIG + CSS
 # ──────────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="ANWW Duikapp", layout="wide")
-APP_BUILD = "v2025-10-05"
+APP_BUILD = "v2025-10-05-no-logo"
 
 def inject_css():
     st.markdown("""
@@ -41,9 +40,7 @@ def inject_css():
         border: 2px solid var(--border) !important; border-radius: 10px !important;
         padding:.45em 1.1em !important; font-weight:600 !important;
       }
-      .center-wrap { display:flex; justify-content:center; }
-      .muted { opacity:.75; font-style:italic; }
-      .tiny { font-size:.9em; opacity:.8; }
+      .muted { opacity:.8; font-style:italic; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -71,41 +68,31 @@ def run_db(fn, what=""):
         raise
 
 # ──────────────────────────────────────────────────────────────────────────────
-# HELPERS: AUTH / SETTINGS
+# HELPERS: AUTH
 # ──────────────────────────────────────────────────────────────────────────────
 def sha256_hex(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
 def auth_check(username: str, password: str):
     """Controleer gebruiker in tabel 'users' (velden: username, password_hash, role)."""
-    res = run_db(lambda c: c.table("users").select("username,password_hash,role").eq("username", username).single().execute(),
+    res = run_db(lambda c: c.table("users").select("username,password_hash,role")
+                 .eq("username", username).maybe_single().execute(),
                  what="users select (login)")
-    if not res.data: return None
+    if not res.data: 
+        return None
     ph = (res.data or {}).get("password_hash") or ""
     ok = (ph == sha256_hex(password)) or (ph == password)  # fallback voor legacy plain
-    if not ok: return None
+    if not ok: 
+        return None
     return {"username": res.data["username"], "role": (res.data.get("role") or "viewer")}
-
-def require_role(*roles):
-    r = st.session_state.get("role")
-    if r not in roles:
-        st.warning("Je hebt geen toegang tot deze pagina.")
-        st.stop()
 
 def current_username(): return st.session_state.get("username")
 def current_role(): return st.session_state.get("role","viewer")
-
-# app settings (logo)
-def settings_get(key: str) -> str | None:
-    res = run_db(lambda c: c.table("app_settings").select("value").eq("key", key).maybe_single().execute(),
-                 what=f"app_settings get {key}")
-    if not res.data: return None
-    return res.data.get("value")
-
-def settings_set(key: str, value: str | None):
-    payload = {"key": key, "value": value}
-    run_db(lambda c: c.table("app_settings").upsert(payload, on_conflict="key").execute(),
-           what=f"app_settings set {key}")
+def require_role(*roles):
+    r = current_role()
+    if r not in roles:
+        st.warning("Je hebt geen toegang tot deze pagina.")
+        st.stop()
 
 # ──────────────────────────────────────────────────────────────────────────────
 # HELPERS: DATA (duikplaatsen / activiteiten / signups)
@@ -169,16 +156,10 @@ def signup_upsert(activiteit_id, username, status, eating=None, meal_choice=None
            what="signup upsert")
 
 # ──────────────────────────────────────────────────────────────────────────────
-# LOGIN + LOGO
+# LOGIN
 # ──────────────────────────────────────────────────────────────────────────────
 def login_page():
     st.title("Aanmelden")
-    # logo tonen (indien ingesteld)
-    logo_url = settings_get("login_logo_url")
-    if logo_url:
-        st.markdown(f'<div class="center-wrap"><img src="{logo_url}" style="max-height:120px;border-radius:12px" /></div>', unsafe_allow_html=True)
-        st.write("")
-
     with st.form("login_form"):
         u = st.text_input("Gebruikersnaam")
         p = st.text_input("Wachtwoord", type="password")
@@ -192,34 +173,7 @@ def login_page():
                 st.session_state["role"] = user["role"]
                 st.success(f"Ingelogd als {user['username']} ({user['role']}).")
                 st.rerun()
-
     st.caption(f"Build: {APP_BUILD}")
-
-def page_settings():
-    require_role("admin")
-    st.header("Beheerinstellingen")
-    st.subheader("Login-logo")
-    logo_url = settings_get("login_logo_url")
-    if logo_url:
-        st.image(logo_url, caption="Huidig logo", width=220)
-    f = st.file_uploader("Upload nieuw logo (JPG/PNG)", type=["jpg","jpeg","png"])
-    if f and st.button("Logo opslaan", type="primary"):
-        # upload naar Supabase Storage (bucket 'assets', object 'login_logo.jpg')
-        data = f.read()
-        try:
-            # verwijder event. bestaande
-            try:
-                sb.storage.from_("assets").remove(["login_logo.jpg"])
-            except Exception:
-                pass
-            sb.storage.from_("assets").upload("login_logo.jpg", data, {"content-type": f"type/{f.name.split('.')[-1]}"})
-            # maak public URL
-            pub = sb.storage.from_("assets").get_public_url("login_logo.jpg")
-            settings_set("login_logo_url", pub)
-            st.success("Logo opgeslagen.")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Opslaan mislukt: {e}")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ACTIVITEITEN
@@ -236,7 +190,7 @@ def page_activiteiten():
                 omschr = st.text_area("Omschrijving")
             with c2:
                 datum = st.date_input("Datum*", value=datetime.date.today())
-                tijd = st.time_input("Tijd (optioneel)", value=None)
+                tijd = st.time_input("Tijd (optioneel)", value=datetime.time(9, 0))
                 # locatie uit duikplaatsen
                 pl = plaatsen_list()
                 locatie = st.selectbox("Locatie", ["— kies —"] + pl, index=0, key="act_loc_select")
@@ -264,7 +218,9 @@ def page_activiteiten():
                 if not titel or not datum:
                     st.warning("Titel en datum zijn verplicht.")
                 else:
-                    meal_opts = [x.strip() for x in [mo1, mo2, mo3] if x and x.strip()]
+                    meal_opts = [x.strip() for x in [mo1, mo2, m3] if x and x.strip()]  # let op: m3 was typo, corrigeer
+                    meal_opts = [mo1, mo2, mo3]
+                    meal_opts = [x.strip() for x in meal_opts if x and x.strip()]
                     try:
                         activiteit_add(
                             titel=titel, omschr=omschr, datum=datum, tijd=tijd,
@@ -273,8 +229,7 @@ def page_activiteiten():
                             created_by=current_username(),
                             enable_counts=ask_counts
                         )
-                        st.success("Activiteit aangemaakt.")
-                        st.rerun()
+                        st.success("Activiteit aangemaakt."); st.rerun()
                     except Exception as e:
                         st.error(f"Mislukt: {e}")
 
@@ -289,7 +244,7 @@ def page_activiteiten():
     user = current_username()
     role = current_role()
 
-    # Lijst (één regel per activiteit + telletjes achteraan)
+    # Lijst (één regel per activiteit + tellers achteraan)
     for i, row in df.iterrows():
         rid = str(row.get("id") or f"idx{i}")
         s = signups_get(row["id"])
@@ -353,11 +308,11 @@ def page_activiteiten():
                 st.markdown("**Mijn inschrijving**")
 
                 prev = myrow.iloc[0] if not myrow.empty else {}
-                prev_eating = bool(prev.get("eating")) if prev else False
-                prev_meal = prev.get("meal_choice") if prev else None
-                prev_comment = prev.get("comment") if prev else ""
-                prev_adults = int(prev.get("adults") or 1)
-                prev_children = int(prev.get("children") or 0)
+                prev_eating = bool(prev.get("eating")) if prev is not None else False
+                prev_meal = prev.get("meal_choice") if prev is not None else None
+                prev_comment = prev.get("comment") if prev is not None else ""
+                prev_adults = int(prev.get("adults") or 1) if prev is not None else 1
+                prev_children = int(prev.get("children") or 0) if prev is not None else 0
 
                 init_index = 0 if my_status in (None, "yes") else 1
                 status_choice = st.radio("Status", ["Ik kom", "Ik kom niet"], horizontal=True,
@@ -444,7 +399,7 @@ def page_activiteiten():
 
     st.divider()
     st.subheader("Wekelijkse mail — eerstvolgende 4")
-    # Bouw een samenvatting die V/K meeneemt als enable_counts actief is
+    # Samenvatting die V/K meeneemt als enable_counts actief is
     mail_df = df.head(4).copy()
     rows = []
     for _, r in mail_df.iterrows():
@@ -485,15 +440,9 @@ def main():
     if st.sidebar.button("Uitloggen"):
         st.session_state.clear(); st.rerun()
 
-    tabs = st.tabs(["Kalender", "Beheerinstellingen"])
+    tabs = st.tabs(["Kalender"])
     with tabs[0]:
         page_activiteiten()
-    with tabs[1]:
-        if current_role() == "admin":
-            page_settings()
-        else:
-            st.info("Alleen voor beheerders.")
 
 if __name__ == "__main__":
     main()
-
