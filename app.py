@@ -251,6 +251,28 @@ def leden_get_by_email(email: str) -> Optional[dict]:
                  what="leden by email")
     rows = res.data or []
     return rows[0] if rows else None
+@st.cache_data
+def brevet_select_options() -> list[str]:
+    """
+    Haal bestaande waarden op uit leden.duikbrevet.
+    Zo vermijden we dat we 'nieuwe' strings wegschrijven die niet door de DB zijn toegestaan.
+    Valt terug op een gangbare set als de tabel nog leeg is.
+    """
+    try:
+        res = run_db(lambda c: c.table("leden").select("duikbrevet").execute(),
+                     what="leden: duikbrevet opties")
+        rows = res.data or []
+        bestaande = sorted({str(r["duikbrevet"]).strip()
+                            for r in rows if r.get("duikbrevet")})
+    except Exception:
+        bestaande = []
+
+    # Als er al iets in de DB staat, die lijst gebruiken
+    if bestaande:
+        return ["(geen)"] + bestaande
+
+    # Nette fallback (veel gebruikt): 1*,2*,3*,4*, AI, 1*I, 2*I, 3*I
+    return ["(geen)", "1*", "2*", "3*", "4*", "AI", "1*I", "2*I", "3*I"]
 
 def leden_get_by_username(username: str) -> Optional[dict]:
     if not username:
