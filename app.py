@@ -538,7 +538,8 @@ def page_ledenbeheer():
             username = st.text_input("Login (username)*")
             role = st.selectbox("Rol/functie", options=ROLE_CHOICES, index=2)  # default member
         with c3:
-            brevet = st.selectbox("Duikbrevet", options=["(geen)"] + BREVET_CHOICES, index=0)
+            # NIEUW
+            brevet = st.selectbox("Duikbrevet", options=brevet_select_options(), index=0)
             optin = st.toggle("Wekelijkse mail", value=True)
             actief = st.toggle("Actief", value=True)
         pw1 = st.text_input("Initieel wachtwoord (alleen bij 1e keer toevoegen)", type="password")
