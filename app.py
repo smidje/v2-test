@@ -229,7 +229,7 @@ def current_email() -> str:
 # ──────────────────────────────────────────────────────────────────────────────
 # Tabellen & helpers
 # ──────────────────────────────────────────────────────────────────────────────
-BREVET_CHOICES = ['k1ster*', '2ster', '3ster', '4ster', '1*I', '2*I', '3*I']
+BREVET_CHOICES = ['k1ster*', '1ster', '2ster', '3ster', '4ster', '1*I', '2*I', '3*I']
 ROLE_CHOICES = ['admin','user','member','viewer']
 
 def leden_upsert(payload: dict):
