@@ -701,8 +701,13 @@ def page_activiteiten():
             with c1:
                 titel = st.text_input("Titel*")
                 omschr = st.text_area("Omschrijving")
+                opmerkingen = st.text_area("Opmerkingen (optioneel)")
             with c2:
-                datum = st.date_input("Datum*", value=datetime.date.today())
+                datum = st.date_input("Datum*", value=datetime.date.today(), format="DD/MM/YYYY")
+                # Weergave-formaat: dag/maand/jaar
+                # (alleen voor nieuwe activiteit)
+                st.session_state.setdefault("_fmt_dummy", None)
+                datum = st.date_input("Datum*", value=datetime.date.today(), format="DD/MM/YYYY")
                 tijd_tp = st.time_input("Ter plaatse (optioneel)", value=None)
 
                 tijd_tw = st.time_input("Te water (optioneel)", value=None)
@@ -741,6 +746,13 @@ def page_activiteiten():
                         omschr = (omschr or '')
                         if 'Te water:' not in omschr:
                             omschr = (omschr + ('\n' if omschr else '') + f'Te water: {_tw}')
+                        # Voeg opmerkingen toe aan omschrijving voor opslag/export
+                        if "opmerkingen" in locals() and opmerkingen:
+                            if (omschr or ""):
+                                omschr = (omschr + "\n\nOpmerkingen: " + opmerkingen.strip())
+                            else:
+                                omschr = "Opmerkingen: " + opmerkingen.strip()
+
                     try:
                         # Voeg 'Te water' toe aan omschrijving indien ingevuld
                         if 'tijd_tw' in locals() and tijd_tw:
@@ -849,6 +861,13 @@ def page_activiteiten():
                         meal_choice = None if mc == "— kies —" else mc
 
                 if st.button("Bewaar mijn keuze", key=f"save_{row['id']}", type="primary"):
+                        # Voeg opmerkingen toe aan omschrijving voor opslag/export
+                        if "opmerkingen" in locals() and opmerkingen:
+                            if (omschr or ""):
+                                omschr = (omschr + "\n\nOpmerkingen: " + opmerkingen.strip())
+                            else:
+                                omschr = "Opmerkingen: " + opmerkingen.strip()
+
                     try:
                         signup_upsert(
                             activiteit_id=row["id"],
@@ -933,7 +952,7 @@ def page_activiteiten():
     if df2.empty:
         st.info("Geen komende activiteiten.")
     else:
-        view = df2[["titel", "datum", "tijd", "locatie"]].copy()
+        view = df2[["titel", "datum", "tijd", "locatie", "omschrijving"]].copy()
         view["datum"] = pd.to_datetime(view["datum"]).dt.strftime("%d/%m/%Y")
         st.dataframe(view, use_container_width=True, hide_index=True)
         out = io.BytesIO()
