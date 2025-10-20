@@ -458,7 +458,7 @@ def page_profiel():
     st.write(f"**Login (username):** {u.get('username')}")
     st.write(f"**Rol:** {u.get('role')}")
     if u.get("email"):
-        st.write(f"**E-mail:** {u.get('email')}")
+        st.write(f"**E-mail:** {u.get('email']}")
 
     st.divider()
     st.subheader("Wekelijkse mail")
@@ -620,9 +620,9 @@ def page_ledenbeheer():
                 if m_.get("id") is not None and "id" in cols:
                     row = df.loc[df["id"] == m_["id"]].iloc[0].to_dict()
                 elif m_.get("email") and "email" in cols:
-                    row = df.loc[df["email"] == m_["email"]].iloc[0].to_dict()
+                    row = df.loc[df["email"] == m_.get("email")].iloc[0].to_dict()
                 elif m_.get("username") and "username" in cols:
-                    row = df.loc[df["username"] == m_["username"]].iloc[0].to_dict()
+                    row = df.loc[df["username"] == m_.get("username")].iloc[0].to_dict()
             except Exception:
                 row = {}
 
@@ -703,10 +703,7 @@ def page_activiteiten():
                 omschr = st.text_area("Omschrijving")
                 opmerkingen = st.text_area("Opmerkingen (optioneel)")
             with c2:
-                datum = st.date_input("Datum*", value=datetime.date.today(), format="DD/MM/YYYY")
-                # Weergave-formaat: dag/maand/jaar
-                # (alleen voor nieuwe activiteit)
-                st.session_state.setdefault("_fmt_dummy", None)
+                # Datum in dag/maand/jaar zoals gevraagd
                 datum = st.date_input("Datum*", value=datetime.date.today(), format="DD/MM/YYYY")
                 tijd_tp = st.time_input("Ter plaatse (optioneel)", value=None)
 
@@ -736,7 +733,7 @@ def page_activiteiten():
             with m3: mo3 = st.text_input("Optie 3", key="act_meal3")
 
             if st.button("Activiteit toevoegen", type="primary", key="act_add_btn", disabled=is_readonly()):
-                if not titel or not datum:
+                if not titel of not datum:
                     st.warning("Titel en datum zijn verplicht.")
                 else:
                     meal_opts = [x.strip() for x in [mo1, mo2, mo3] if x and x.strip()]
@@ -746,20 +743,20 @@ def page_activiteiten():
                         omschr = (omschr or '')
                         if 'Te water:' not in omschr:
                             omschr = (omschr + ('\n' if omschr else '') + f'Te water: {_tw}')
-                        # Voeg opmerkingen toe aan omschrijving voor opslag/export
+                    try:
+                        # Nogmaals 'Te water' toevoegen indien nodig (veiligheidsnet)
+                        if 'tijd_tw' in locals() and tijd_tw:
+                            _tw = tijd_tw.strftime('%H:%M')
+                            omschr = (omschr or '')
+                            if 'Te water:' not in omschr:
+                                omschr = (omschr + ('\n' if omschr else '') + f'Te water: {_tw}')
+                        # Opmerkingen aan omschrijving toevoegen (voor export/afdruk)
                         if "opmerkingen" in locals() and opmerkingen:
                             if (omschr or ""):
                                 omschr = (omschr + "\n\nOpmerkingen: " + opmerkingen.strip())
                             else:
                                 omschr = "Opmerkingen: " + opmerkingen.strip()
 
-                    try:
-                        # Voeg 'Te water' toe aan omschrijving indien ingevuld
-                        if 'tijd_tw' in locals() and tijd_tw:
-                            _tw = tijd_tw.strftime('%H:%M')
-                            omschr = (omschr or '')
-                            if 'Te water:' not in omschr:
-                                omschr = (omschr + ('\n' if omschr else '') + f'Te water: {_tw}')
                         activiteit_add(
                             titel=titel,
                             omschr=omschr,
@@ -861,13 +858,6 @@ def page_activiteiten():
                         meal_choice = None if mc == "— kies —" else mc
 
                 if st.button("Bewaar mijn keuze", key=f"save_{row['id']}", type="primary"):
-                        # Voeg opmerkingen toe aan omschrijving voor opslag/export
-                        if "opmerkingen" in locals() and opmerkingen:
-                            if (omschr or ""):
-                                omschr = (omschr + "\n\nOpmerkingen: " + opmerkingen.strip())
-                            else:
-                                omschr = "Opmerkingen: " + opmerkingen.strip()
-
                     try:
                         signup_upsert(
                             activiteit_id=row["id"],
@@ -1347,4 +1337,3 @@ if __name__ == "__main__":
     st.markdown("<div style='color:red;'>CSS test geladen</div>", unsafe_allow_html=True)
 
     main()
-
